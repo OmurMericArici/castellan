@@ -3,6 +3,19 @@
 Newest first. One entry per session: what changed, what was learned, what's next.
 Add a screenshot/GIF path whenever something is visible.
 
+## 2026-11-14 — M2 Archie and the interpreter
+
+- Expression language (`expr.ts`): own tokenizer + Pratt parser, strict types, fixed function list,
+  seeded randomness only, names checked at load time, bounded (length, depth, steps), errors with columns.
+- Pack format v0.1 and Archie's checks (`packs.ts`): strict keys with "did you mean" hints, naming rules,
+  missing/circular requirements, conflicts; packs ordered by requirements.
+- `loadPacks` emits `pack.loaded` events carrying the pack JSON; replay rebuilds the registry from the log.
+- `src/packs/core.json`: Person, Tree, Stone (leaves with rolled defaults), Sighting, Survive, Shelter,
+  Explore, and the `knows` / `has` edges. Noah now only places leaf types from loaded packs.
+- `docs/PACKS.md`: the author guide, written so an LLM can produce a valid pack from it. ADR-0023.
+- 27 tests. Checked in Chrome: same map as M1 for the same seed, packs shown, no console errors.
+- **Next:** M3, Adam: people wander, see, explore, remember, choose by weighted goals.
+
 ## 2026-11-14 — M1 world core
 
 - Core modules: `space` (fields from seeded fBm or derived from another field), `graph` (3 node kinds,

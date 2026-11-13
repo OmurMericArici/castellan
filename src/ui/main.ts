@@ -1,4 +1,5 @@
-import { createWorld, genesis } from "../core";
+import { createWorld, genesis, loadPacks } from "../core";
+import CORE from "../packs/core.json";
 import { DEFAULT_NOAH } from "./noah-default";
 import { drawWorld, renderSpace } from "./render";
 import type { FieldView } from "./render";
@@ -16,12 +17,22 @@ const seedLabel = $<HTMLElement>("#seed");
 const viewSelect = $<HTMLSelectElement>("#view");
 const newSeedButton = $<HTMLButtonElement>("#new-seed");
 const summary = $<HTMLElement>("#summary");
+const packsLabel = $<HTMLElement>("#packs");
 
 const params = new URLSearchParams(location.search);
 const seed = Number(params.get("seed") ?? 1) >>> 0;
 seedLabel.textContent = String(seed);
 
 const world = createWorld(seed);
+try {
+  loadPacks(world, [CORE]);
+} catch (e) {
+  // Archie's message lists every problem with its place in the pack.
+  summary.textContent = e instanceof Error ? e.message : String(e);
+  summary.classList.add("error");
+  throw e;
+}
+packsLabel.textContent = world.registry.packs.map((p) => `${p.id} ${p.version}`).join(", ");
 const report = genesis(world, DEFAULT_NOAH);
 const space = world.space!;
 

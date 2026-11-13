@@ -1,7 +1,8 @@
+import { instantiateAttrs, requireType } from "./archie";
 import type { Attrs } from "./graph";
 import { createRng, hash2, hashString } from "./rng";
 import type { SpaceSpec } from "./space";
-import { createNode, emit } from "./world";
+import { emit } from "./world";
 import type { World } from "./world";
 
 /**
@@ -14,7 +15,7 @@ export interface NoahConfig {
 }
 
 export interface LeafSpec {
-  /** A leaf type name, e.g. "Tree". From M2 on, Archie checks it is a leaf type from a loaded pack. */
+  /** A leaf entity type from a loaded pack, e.g. "Tree". */
   type: string;
   count: number;
   attrs?: Attrs;
@@ -32,7 +33,16 @@ export interface GenesisReport {
 const TRIES_PER_LEAF = 200;
 
 export function genesis(world: World, config: NoahConfig): GenesisReport {
-  if (world.log.length > 0) throw new Error("Noah only works on an empty world");
+  const used = world.space !== undefined || world.graph.nodeCount > 0;
+  if (used) throw new Error("Noah only works on an empty world");
+  if (world.registry.types.size === 0) throw new Error("load packs first: Noah can only place types that packs define");
+  // Check every spec before touching the world, so a bad config changes nothing.
+  for (const spec of config.leaves) {
+    const type = requireType(world.registry, spec.type, "entity");
+    if (!type.leaf) {
+      throw new Error(`"${spec.type}" is not a leaf type (pack "${type.pack}"); Noah can only place leaves, derived things must emerge`);
+    }
+  }
   emit(world, "noah", { kind: "space.defined", spec: config.space });
   const space = world.space;
   if (!space) throw new Error("space was not created");
@@ -42,6 +52,7 @@ export function genesis(world: World, config: NoahConfig): GenesisReport {
     if (!Number.isInteger(spec.count) || spec.count < 0) {
       throw new Error(`leaf "${spec.type}": count must be a whole number ≥ 0, got ${spec.count}`);
     }
+    const type = requireType(world.registry, spec.type, "entity");
     const prefer = spec.prefer ? space.field(spec.prefer) : undefined;
     const avoid = (spec.avoid ?? []).map((a) => ({ field: space.field(a.field), above: a.above }));
     const rng = createRng(world.seed).fork(hash2(hashString(`noah:${spec.type}`), index));
@@ -52,7 +63,9 @@ export function genesis(world: World, config: NoahConfig): GenesisReport {
       const y = rng.next() * space.height;
       if (avoid.some((a) => a.field.sample(x, y) > a.above)) continue;
       if (prefer && rng.next() >= prefer.sample(x, y)) continue;
-      createNode(world, "noah", { kind: "entity", type: spec.type, pos: { x, y }, attrs: { ...spec.attrs } });
+      const id = world.graph.allocateNodeId();
+      const attrs = instantiateAttrs(type, createRng(world.seed).fork(hash2(id, 0x6e6f6168)), spec.attrs);
+      emit(world, "noah", { kind: "node.created", node: { id, kind: "entity", type: spec.type, pos: { x, y }, attrs } });
       placed++;
     }
     report.placed.push({ type: spec.type, requested: spec.count, placed });

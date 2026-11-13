@@ -1,5 +1,7 @@
 import { Graph } from "./graph";
 import type { Attrs, EdgeId, NodeId, NodeKind, Vec2 } from "./graph";
+import { checkPacks, EMPTY_REGISTRY, formatPackError } from "./packs";
+import type { Registry } from "./packs";
 import { EventQueue } from "./queue";
 import { hashString } from "./rng";
 import { generateSpace } from "./space";
@@ -10,6 +12,7 @@ import type { Space, SpaceSpec } from "./space";
  * Events are plain data, so the log can be saved, replayed and read as history.
  */
 export type WorldEvent =
+  | { kind: "pack.loaded"; source: unknown }
   | { kind: "space.defined"; spec: SpaceSpec }
   | { kind: "node.created"; node: NodeInit }
   | { kind: "edge.created"; edge: EdgeInit }
@@ -56,6 +59,10 @@ export interface World {
   /** Current time in days (ADR-0022). */
   time: number;
   space: Space | undefined;
+  /** Pack sources in load order, exactly as recorded in the log. */
+  readonly packs: unknown[];
+  /** Types and rules from the loaded packs (Archie). */
+  registry: Registry;
   readonly graph: Graph;
   readonly log: LoggedEvent[];
   readonly queue: EventQueue<Scheduled>;
@@ -66,6 +73,8 @@ export function createWorld(seed: number): World {
     seed: seed >>> 0,
     time: 0,
     space: undefined,
+    packs: [],
+    registry: EMPTY_REGISTRY,
     graph: new Graph(),
     log: [],
     queue: new EventQueue<Scheduled>(),
@@ -83,6 +92,13 @@ export function emit(world: World, by: string, event: WorldEvent): LoggedEvent {
 function apply(world: World, event: WorldEvent): void {
   const g = world.graph;
   switch (event.kind) {
+    case "pack.loaded": {
+      const result = checkPacks([...world.packs, event.source]);
+      if (!result.ok) throw new Error(`pack.loaded: ${result.errors.map(formatPackError).join("; ")}`);
+      world.packs.push(event.source);
+      world.registry = result.registry;
+      return;
+    }
     case "space.defined":
       if (world.space) throw new Error("the space is already defined");
       world.space = generateSpace(world.seed, event.spec);

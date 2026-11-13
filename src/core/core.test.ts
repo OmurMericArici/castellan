@@ -7,6 +7,8 @@ import { EventQueue } from "./queue";
 import { createEdge, createNode, createWorld, digest, emit, replay, runUntil, schedule } from "./world";
 import type { Handler } from "./world";
 import { genesis } from "./noah";
+import { loadPacks } from "./archie";
+import CORE from "../packs/core.json";
 import type { NoahConfig } from "./noah";
 
 const SPACE: SpaceSpec = {
@@ -116,8 +118,9 @@ describe("world", () => {
     expect(seen).toEqual([2, 30]);
   });
 
-  it("can be rebuilt from its log alone", () => {
+  it("can be rebuilt from its log alone, packs included", () => {
     const w = createWorld(11);
+    loadPacks(w, [CORE]);
     genesis(w, CONFIG);
     const id = [...w.graph.nodes({ type: "Person" })][0]!.id;
     w.time = 4;
@@ -126,23 +129,30 @@ describe("world", () => {
     expect(digest(r)).toBe(digest(w));
     expect(r.graph.node(id)?.pos).toEqual({ x: 3, y: 3 });
     expect(r.graph.nodeCount).toBe(w.graph.nodeCount);
+    expect(r.registry.types.has("Tree")).toBe(true);
   });
 });
 
+const fresh = (seed: number) => {
+  const w = createWorld(seed);
+  loadPacks(w, [CORE]);
+  return w;
+};
+
 describe("Noah", () => {
   it("makes the same world from the same seed and config", () => {
-    const a = createWorld(7);
-    const b = createWorld(7);
+    const a = fresh(7);
+    const b = fresh(7);
     genesis(a, CONFIG);
     genesis(b, CONFIG);
     expect(digest(a)).toBe(digest(b));
-    const c = createWorld(8);
+    const c = fresh(8);
     genesis(c, CONFIG);
     expect(digest(c)).not.toBe(digest(a));
   });
 
   it("places leaves only where the fields allow", () => {
-    const w = createWorld(7);
+    const w = fresh(7);
     const report = genesis(w, CONFIG);
     const water = w.space!.field("water");
     for (const n of w.graph.nodes({ kind: "entity" })) {
@@ -152,8 +162,31 @@ describe("Noah", () => {
   });
 
   it("refuses to run twice", () => {
-    const w = createWorld(7);
+    const w = fresh(7);
     genesis(w, CONFIG);
     expect(() => genesis(w, CONFIG)).toThrow(/empty world/);
+  });
+
+  it("gives each leaf its pack defaults, reproducibly", () => {
+    const w = fresh(7);
+    genesis(w, CONFIG);
+    for (const t of w.graph.nodes({ type: "Tree" })) {
+      const wood = t.attrs["wood"] as number;
+      expect(Number.isInteger(wood) && wood >= 4 && wood <= 12).toBe(true);
+    }
+    const again = fresh(7);
+    genesis(again, CONFIG);
+    expect(digest(again)).toBe(digest(w));
+  });
+
+  it("only places leaf types that packs define", () => {
+    expect(() => genesis(createWorld(1), CONFIG)).toThrow(/load packs first/);
+    expect(() => genesis(fresh(1), { ...CONFIG, leaves: [{ type: "House", count: 1 }] })).toThrow(/unknown type "House"/);
+    expect(() => genesis(fresh(1), { ...CONFIG, leaves: [{ type: "Sighting", count: 1 }] })).toThrow(/knowledge type/);
+    const nonLeaf = { pack: "town", version: "0.1.0", types: { House: { kind: "entity" } } };
+    const w = createWorld(1);
+    loadPacks(w, [CORE, nonLeaf]);
+    expect(() => genesis(w, { ...CONFIG, leaves: [{ type: "House", count: 1 }] })).toThrow(/not a leaf type/);
+    expect(w.space).toBeUndefined();
   });
 });

@@ -57,3 +57,4 @@ even while the record is still proposed.
 | 0020 | [Adam: the engine that runs people](0020-adam.md) | accepted |
 | 0021 | [Entropy as its own character](0021-entropy.md) | accepted |
 | 0022 | [World core: time unit and data structures](0022-world-core.md) | accepted (technical) |
+| 0023 | [Expression language and pack format v0.1](0023-expression-language-and-pack-format.md) | accepted (technical) |

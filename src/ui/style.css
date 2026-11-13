@@ -39,6 +39,7 @@ select, button {
 button { cursor: pointer; }
 canvas { display: block; width: 100%; height: auto; border-radius: 6px; margin-bottom: 8px; image-rendering: pixelated; }
 code { font-size: 0.9em; }
+.error { color: #b3261e; white-space: pre-wrap; }
 .legend { display: flex; gap: 6px 14px; align-items: center; flex-wrap: wrap; }
 .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: -8px; vertical-align: middle; }
 .dot.tree { background: #2f5e2a; }
