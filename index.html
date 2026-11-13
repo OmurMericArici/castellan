@@ -9,10 +9,20 @@
   <body>
     <header>
       <h1>Castellan</h1>
-      <p>A node-based world builder. Milestone M2: the world's types now come from packs, checked by Archie.</p>
+      <p>A node-based world builder. Milestone M3: people explore, remember what they see, and rest when night falls. Click a person to follow them.</p>
     </header>
     <main>
       <div class="controls">
+        <strong id="clock"></strong>
+        <label>Speed
+          <select id="speed">
+            <option value="0">paused</option>
+            <option value="0.02">slow</option>
+            <option value="0.06" selected>normal</option>
+            <option value="0.25">fast</option>
+            <option value="1">very fast</option>
+          </select>
+        </label>
         <label>View
           <select id="view"><option value="terrain">terrain</option></select>
         </label>
@@ -25,7 +35,9 @@
         <span class="dot tree"></span> tree
         <span class="dot stone"></span> stone
         <span class="dot person"></span> person
+        <span class="ring"></span> known to the selected person
       </p>
+      <section id="person" aria-live="polite"></section>
     </main>
     <script type="module" src="./src/ui/main.ts"></script>
   </body>

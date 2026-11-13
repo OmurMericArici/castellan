@@ -1,7 +1,7 @@
 # Writing packs
 
 A pack adds things to a Castellan world: types of entities, knowledge and mind,
-edge types, and (from M3 on) rules. Packs are **plain JSON**. Nothing in a pack
+edge types, and the rules of how people's minds work. Packs are **plain JSON**. Nothing in a pack
 runs as code: values that need logic use Castellan's small expression language,
 which Castellan parses and evaluates itself.
 
@@ -10,7 +10,7 @@ a valid pack from it. Archie (the architect) checks every pack before it loads
 and explains each problem with its exact place, so a failed pack can be fixed
 from the error alone.
 
-Format version: **0.1** (M2). Rules arrive in M3; this page grows with them.
+Format version: **0.2** (M3): adds `memorable` entities and need/goal/action rules.
 
 ## Shape
 
@@ -44,9 +44,41 @@ Type names are PascalCase (`Musket`, `Sighting`). A name can be defined by only 
 |---|---|
 | `kind` | `entity` (exists in the world, has a place), `knowledge` (a shared claim or skill), or `mind` (a shared piece of how people think) |
 | `leaf` | entities only. `true` means Noah may place it at the start (person, tree, stone). Derived things (house, village) are **not** leaves: they must emerge. |
+| `memorable` | entities only. `true` means people remember seeing it (they form a shared `Sighting` claim). |
 | `role` | mind types only, required: `need`, `goal`, `action` or `trait` |
 | `attrs` | attribute definitions, by name |
 | `description` | free text |
+
+## Mind rules
+
+Mind types carry the rules for how people think. Packs decide **why** people do
+things; the engine (Adam) knows **how** to do a fixed set of verbs.
+
+| Role | Keys | Meaning |
+|---|---|---|
+| `need` | `start`, `rate`, `urgentAt` | A level in [0, 1] per person. `start` is rolled once (can use `self` and random functions); `rate` is the change per day; above `urgentAt` (default 0.7) the need is urgent and people re-think when they cross it. |
+| `goal` | `tier`, `weight` | `tier` 1 survive, 2 secure, 3 belong, 4 grow. `weight` in [0, 1] says how much the goal matters right now. An urgent tier-1 goal takes over from everything else (unless the person's determination holds them a little longer). |
+| `action` | `do`, `serves` | `do` is the verb Adam carries out: `explore`, `wander`, `rest`. `serves` maps goal names to how much the action helps each one. |
+
+Each of `start`, `rate`, `weight` and the values in `serves` is a number or
+`{ "expr": "…" }`. Inside them these names exist:
+
+| Name | Value |
+|---|---|
+| `needs.Fear` | the person's current level of the need `Fear` (any need type) |
+| `knows.Tree` | how many things of the memorable type `Tree` the person knows |
+| `night` | true between dusk (21:00) and dawn (06:00) |
+| `doing` | the name of the action the person is doing, e.g. `"Rest"` |
+| `self.age` | the person's own attributes |
+
+People pick the action with the highest score: the sum over goals of
+`weight × serves`. Example from `core`:
+
+```json
+"Fear":    { "kind": "mind", "role": "need", "start": 0, "rate": { "expr": "if(night, 6, -8)" }, "urgentAt": 0.6 },
+"Survive": { "kind": "mind", "role": "goal", "tier": 1, "weight": { "expr": "needs.Fear" } },
+"Rest":    { "kind": "mind", "role": "action", "do": "rest", "serves": { "Survive": { "expr": "if(night, 1, 0)" }, "Recover": 1 } }
+```
 
 ## Attributes
 
@@ -56,7 +88,7 @@ Attribute names are camelCase (`wood`, `learnedAt`).
 |---|---|
 | `type` | `number`, `string` or `boolean` |
 | `min`, `max` | numbers only; values outside are clamped |
-| `default` | a literal of the right type, or `{ "expr": "…" }` (number/boolean only) evaluated once when the node is created |
+| `default` | a literal of the right type, or `{ "expr": "…" }` evaluated once when the node is created (`pick("Ayla", "Bora")` for text) |
 | `description` | free text |
 
 Expression defaults are rolled with the node's own seeded generator, so the same
@@ -91,7 +123,7 @@ anything, loop, or call anything outside the list below.
 | Grouping | `( … )` |
 | Names | `self.age`; which names exist depends on where the expression is. In attribute defaults: none. |
 | Functions | `min(a, …)`, `max(a, …)`, `clamp(x, lo, hi)`, `lerp(a, b, t)`, `abs`, `floor`, `ceil`, `round`, `sqrt`, `if(cond, a, b)` (only the chosen branch runs) |
-| Random | `rand()` in [0, 1), `rand_range(a, b)`, `rand_int(a, b)` inclusive; seeded, only where the place allows it |
+| Random | `rand()` in [0, 1), `rand_range(a, b)`, `rand_int(a, b)` inclusive, `pick(a, b, …)` one of its arguments; seeded, only where the place allows it (attribute defaults and need `start`) |
 
 Limits: 500 characters, nesting depth 48, 10 000 evaluation steps.
 
@@ -108,7 +140,7 @@ if(rand() < 0.1, 3, 1)
 1. Pick an id and `requires` (almost always `"core"`).
 2. Add entity types; mark only truly basic things as `leaf`.
 3. Add knowledge types for what people can know about them (and know-how later).
-4. Add mind types: needs, goals, actions, traits.
+4. Add mind types: needs (how they rise and fall), goals (tier and weight), actions (a verb and the goals it serves).
 5. Add edges with the data each end needs.
 6. Load it; fix whatever Archie reports, using the paths in its messages.
 

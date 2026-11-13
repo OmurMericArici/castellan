@@ -3,6 +3,22 @@
 Newest first. One entry per session: what changed, what was learned, what's next.
 Add a screenshot/GIF path whenever something is visible.
 
+## 2026-11-14 — M3 Adam
+
+- People live: event-driven walking legs (A* over the fields), sight events computed ahead along each leg,
+  explore/wander/rest, shared `Sighting` claims with `about` + `knows` edges.
+- Minds from the pack: needs (Fear, Fatigue, Shelter) as lazy levels, goals with tiers (Survive, Recover,
+  Secure, Grow), actions with verbs and `serves`. Determination keeps people going after dark: in tests,
+  fully determined people start resting later than undetermined ones.
+- Molly signals dusk and dawn; everyone re-thinks. Day starts at dawn (06:00), night from 21:00.
+- Pack format v0.2 (`memorable`, need/goal/action rules; `pick()` for names); Archie checks names used in
+  mind expressions. ADR-0024, PACKS.md updated.
+- First tuning: trees are dense, so a fixed "know 8 trees" threshold ended exploring after one leg; curiosity
+  now fades with familiarity (explore phase on day 1, then local life).
+- UI: real-time playback with speed control, night shading, click a person to see needs, what they know
+  (ringed) and their story built from the log. 33 tests; 5 days × 6 people ≈ 0.2 s.
+- **Next:** M4 shelter: house concepts, gathering wood, building, village recognition and naming.
+
 ## 2026-11-14 — M2 Archie and the interpreter
 
 - Expression language (`expr.ts`): own tokenizer + Pratt parser, strict types, fixed function list,

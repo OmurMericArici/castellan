@@ -21,6 +21,38 @@ export interface AttrDef {
 
 export type MindRole = "need" | "goal" | "action" | "trait";
 
+/** A number written as a literal or an expression. */
+export type NumberSource = { literal: number } | { expr: Compiled };
+
+/** How a need behaves (ADR-0024): a level in [0, 1] that moves at a rate. */
+export interface NeedRule {
+  readonly start: NumberSource;
+  /** Change per day; may depend on night, what the person is doing, etc. */
+  readonly rate: NumberSource;
+  /** Above this the need counts as urgent; people are woken when they cross it. */
+  readonly urgentAt: number;
+}
+
+export interface GoalRule {
+  /** 1 survive, 2 secure, 3 belong, 4 grow. Lower tiers can pre-empt higher ones. */
+  readonly tier: number;
+  readonly weight: NumberSource;
+}
+
+export interface ActionRule {
+  /** The engine verb that carries the action out (Adam's machinery). */
+  readonly verb: Verb;
+  /** How much the action helps each goal. */
+  readonly serves: ReadonlyMap<string, NumberSource>;
+}
+
+/** What Adam knows how to do physically. Packs decide when and why. */
+export const VERBS = ["explore", "wander", "rest"] as const;
+export type Verb = (typeof VERBS)[number];
+
+/** Names a mind expression may read. */
+export const MIND_SCOPE = ["needs", "night", "knows", "self", "doing"] as const;
+
 export interface TypeDef {
   readonly name: string;
   readonly kind: NodeKind;
@@ -28,6 +60,11 @@ export interface TypeDef {
   /** Entities only: may Noah place it from outside? (ADR-0006) */
   readonly leaf: boolean;
   readonly role?: MindRole;
+  /** Entities only: people form Sighting knowledge when they see it. */
+  readonly memorable: boolean;
+  readonly need?: NeedRule;
+  readonly goal?: GoalRule;
+  readonly action?: ActionRule;
   readonly attrs: ReadonlyMap<string, AttrDef>;
   readonly description?: string;
 }
@@ -108,6 +145,74 @@ class Checker {
   }
 }
 
+function numberSource(c: Checker, raw: unknown, path: string, scope: readonly string[]): NumberSource | undefined {
+  if (typeof raw === "number" && Number.isFinite(raw)) return { literal: raw };
+  if (isObj(raw)) {
+    c.keys(raw, path, ["expr"]);
+    if (typeof raw["expr"] === "string") {
+      try {
+        return { expr: compile(raw["expr"], scope) };
+      } catch (e) {
+        c.err(`${path}.expr`, e instanceof ExprError ? e.message : String(e));
+        return undefined;
+      }
+    }
+  }
+  c.err(path, `must be a number or { "expr": "..." }`);
+  return undefined;
+}
+
+const MIND_KEYS: Record<MindRole, readonly string[]> = {
+  need: ["start", "rate", "urgentAt"],
+  goal: ["tier", "weight"],
+  action: ["do", "serves"],
+  trait: [],
+};
+const ALL_MIND_KEYS: readonly string[] = Object.values(MIND_KEYS).flat();
+
+function checkMind(c: Checker, spec: Obj, p: string, role: MindRole): Pick<TypeDef, "need" | "goal" | "action"> {
+  for (const k of ALL_MIND_KEYS) {
+    if (k in spec && !MIND_KEYS[role].includes(k)) {
+      const owner = (Object.keys(MIND_KEYS) as MindRole[]).find((r) => MIND_KEYS[r].includes(k));
+      c.err(`${p}.${k}`, `"${k}" belongs to ${owner} types, not ${role} types`);
+    }
+  }
+  if (role === "need") {
+    const start = spec["start"] === undefined ? { literal: 0 } : numberSource(c, spec["start"], `${p}.start`, ["self"]);
+    const rate = spec["rate"] === undefined ? { literal: 0 } : numberSource(c, spec["rate"], `${p}.rate`, MIND_SCOPE);
+    const urgentAt = spec["urgentAt"] ?? 0.7;
+    if (typeof urgentAt !== "number" || urgentAt <= 0 || urgentAt > 1) c.err(`${p}.urgentAt`, "must be a number in (0, 1]");
+    return start && rate && typeof urgentAt === "number" ? { need: { start, rate, urgentAt } } : {};
+  }
+  if (role === "goal") {
+    const tier = spec["tier"];
+    const tierOk = typeof tier === "number" && Number.isInteger(tier) && tier >= 1 && tier <= 4;
+    if (!tierOk) c.err(`${p}.tier`, "goals need a tier: 1 survive, 2 secure, 3 belong, 4 grow");
+    const weight = numberSource(c, spec["weight"], `${p}.weight`, MIND_SCOPE);
+    return weight && tierOk ? { goal: { tier: tier as number, weight } } : {};
+  }
+  if (role === "action") {
+    const verb = spec["do"];
+    const verbOk = typeof verb === "string" && (VERBS as readonly string[]).includes(verb);
+    if (!verbOk) {
+      const hint = typeof verb === "string" ? suggest(verb, VERBS) : "";
+      c.err(`${p}.do`, `actions need a verb Adam knows: ${VERBS.join(", ")}${hint}`);
+    }
+    const serves = new Map<string, NumberSource>();
+    const raw = spec["serves"];
+    if (!isObj(raw)) {
+      c.err(`${p}.serves`, `must be an object like { "Survive": 1 }`);
+    } else {
+      for (const [goal, v] of Object.entries(raw)) {
+        const src = numberSource(c, v, `${p}.serves.${goal}`, MIND_SCOPE);
+        if (src) serves.set(goal, src);
+      }
+    }
+    return verbOk ? { action: { verb: verb as Verb, serves } } : {};
+  }
+  return {};
+}
+
 function checkAttrs(c: Checker, raw: unknown, path: string): Map<string, AttrDef> {
   const out = new Map<string, AttrDef>();
   if (raw === undefined) return out;
@@ -148,8 +253,6 @@ function checkAttrs(c: Checker, raw: unknown, path: string): Map<string, AttrDef
         c.keys(d, `${p}.default`, ["expr"]);
         if (typeof d["expr"] !== "string") {
           c.err(`${p}.default`, `an expression default looks like { "expr": "rand_int(1, 6)" }`);
-        } else if (attrType !== "number" && attrType !== "boolean") {
-          c.err(`${p}.default`, `expression defaults are only for number and boolean attributes`);
         } else {
           try {
             def = { expr: compile(d["expr"], DEFAULT_SCOPE) };
@@ -218,7 +321,7 @@ function checkOne(raw: unknown, index: number): { parts?: PackParts; errors: Pac
       c.err(p, `must be an object like { "kind": "entity" }`);
       continue;
     }
-    c.keys(spec, p, ["kind", "leaf", "role", "attrs", "description"]);
+    c.keys(spec, p, ["kind", "leaf", "memorable", "role", "attrs", "description", ...ALL_MIND_KEYS]);
     const kind = spec["kind"];
     if (typeof kind !== "string" || !KINDS.includes(kind as NodeKind)) {
       c.err(`${p}.kind`, `must be one of ${KINDS.join(", ")}`);
@@ -233,13 +336,24 @@ function checkOne(raw: unknown, index: number): { parts?: PackParts; errors: Pac
     } else if (role !== undefined) {
       c.err(`${p}.role`, "only mind types have a role");
     }
+    const memorable = spec["memorable"];
+    if (memorable !== undefined && typeof memorable !== "boolean") c.err(`${p}.memorable`, "must be true or false");
+    if (memorable === true && kind !== "entity") c.err(`${p}.memorable`, "only entities can be memorable");
+    const mindRole =
+      kind === "mind" && typeof role === "string" && ROLES.includes(role as MindRole) ? (role as MindRole) : undefined;
+    if (kind !== "mind") {
+      for (const k of ALL_MIND_KEYS) if (k in spec) c.err(`${p}.${k}`, `only mind types have "${k}"`);
+    }
+    const mind = mindRole ? checkMind(c, spec, p, mindRole) : {};
     const description = c.optString(spec, "description", p);
     types.push({
       name,
       kind: kind as NodeKind,
       pack: id,
       leaf: leaf === true,
-      ...(kind === "mind" && typeof role === "string" ? { role: role as MindRole } : {}),
+      memorable: memorable === true,
+      ...mind,
+      ...(mindRole ? { role: mindRole } : {}),
       attrs: checkAttrs(c, spec["attrs"], `${p}.attrs`),
       ...(description ? { description } : {}),
     });
@@ -344,6 +458,42 @@ export function checkPacks(sources: readonly unknown[]): CheckResult {
     }
   }
   if (errors.length) return { ok: false, errors };
+  errors.push(...crossCheckMind(types));
+  if (errors.length) return { ok: false, errors };
 
   return { ok: true, registry: { packs: ordered.map((p) => ({ id: p.id, version: p.version })), types, edges } };
+}
+
+/** Names used inside mind expressions and `serves` must exist across all loaded packs. */
+function crossCheckMind(types: ReadonlyMap<string, TypeDef>): PackError[] {
+  const errors: PackError[] = [];
+  const all = [...types.values()];
+  const names = (pred: (t: TypeDef) => boolean) => all.filter(pred).map((t) => t.name);
+  const goals = names((t) => t.role === "goal");
+  const needs = names((t) => t.role === "need");
+  const memorables = names((t) => t.memorable);
+
+  for (const t of all) {
+    const sources: [string, NumberSource][] = [];
+    if (t.need) sources.push(["rate", t.need.rate]);
+    if (t.goal) sources.push(["weight", t.goal.weight]);
+    for (const [goal, src] of t.action?.serves ?? []) {
+      sources.push([`serves.${goal}`, src]);
+      if (!goals.includes(goal)) {
+        errors.push({ pack: t.pack, path: `types.${t.name}.serves.${goal}`, message: `"${goal}" is not a goal type${suggest(goal, goals)}` });
+      }
+    }
+    for (const [where, src] of sources) {
+      if (!("expr" in src)) continue;
+      for (const path of src.expr.paths) {
+        const [root, name = ""] = path.split(".");
+        const list = root === "needs" ? needs : root === "knows" ? memorables : undefined;
+        if (list && !list.includes(name)) {
+          const what = root === "needs" ? "need type" : "memorable entity type";
+          errors.push({ pack: t.pack, path: `types.${t.name}.${where}`, message: `"${path}": "${name}" is not a ${what}${suggest(name, list)}` });
+        }
+      }
+    }
+  }
+  return errors;
 }

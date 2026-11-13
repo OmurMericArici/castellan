@@ -42,6 +42,8 @@ export interface Compiled {
   readonly source: string;
   /** Root variable names the expression reads (`self` for `self.age`). */
   readonly vars: ReadonlySet<string>;
+  /** First-level member paths read, e.g. "needs.Rest", so Archie can check the names. */
+  readonly paths: ReadonlySet<string>;
   readonly usesRandom: boolean;
   readonly ast: Ast;
 }
@@ -71,6 +73,8 @@ const FUNCTIONS: Record<string, FnDef> = {
   sqrt: num1(Math.sqrt),
   // `if` is lazy: only the chosen branch is evaluated. Handled in evaluate().
   if: { min: 3, max: 3 },
+  // `pick` returns one of its arguments at random (any value type). Handled in evaluate().
+  pick: { min: 1, max: 64, random: true },
   rand: { min: 0, max: 0, random: true, call: (_a, rng, col) => needRng(rng, "rand", col).next() },
   rand_range: {
     min: 2,
@@ -170,6 +174,7 @@ const KEYWORDS = new Set(["and", "or", "not", "true", "false", "null"]);
 class Parser {
   private pos = 0;
   readonly vars = new Set<string>();
+  readonly paths = new Set<string>();
   usesRandom = false;
 
   constructor(private readonly toks: Tok[]) {}
@@ -269,6 +274,7 @@ class Parser {
       this.next();
       const field = this.next();
       if (field.t !== "id") throw new ExprError(`expected a name after "." but found ${describe(field)}`, field.col);
+      if (node.k === "var") this.paths.add(`${node.name}.${field.v}`);
       node = { k: "member", obj: node, name: field.v, col: field.col };
     }
     return node;
@@ -334,7 +340,7 @@ export function compile(source: string, allowedVars: Iterable<string> = []): Com
       throw new ExprError(`unknown name "${v}"${suggest(v, allowed)}${where}`);
     }
   }
-  return { source, vars: parser.vars, usesRandom: parser.usesRandom, ast };
+  return { source, vars: parser.vars, paths: parser.paths, usesRandom: parser.usesRandom, ast };
 }
 
 export interface EvalContext {
@@ -389,6 +395,10 @@ export function evaluate(expr: Compiled, ctx: EvalContext = {}): Value {
       case "call": {
         if (n.name === "if") {
           return bool(ev(n.args[0]!), n.col, "if") ? ev(n.args[1]!) : ev(n.args[2]!);
+        }
+        if (n.name === "pick") {
+          const i = needRng(ctx.rng, "pick", n.col).int(0, n.args.length - 1);
+          return ev(n.args[i]!);
         }
         const fn = FUNCTIONS[n.name]!;
         const args = n.args.map((a) => num(ev(a), n.col, `${n.name}()`));

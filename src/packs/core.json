@@ -1,6 +1,6 @@
 {
   "pack": "core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "The basic things of a Castellan world: people, trees, stones, what people can know, and the first pieces of a mind.",
   "types": {
     "Person": {
@@ -8,13 +8,15 @@
       "leaf": true,
       "description": "A person's body in the world. Their mind and knowledge are edges to shared nodes.",
       "attrs": {
+        "name": { "type": "string", "default": { "expr": "pick(\"Ayla\", \"Bora\", \"Cem\", \"Defne\", \"Eda\", \"Fen\", \"Gül\", \"Ilka\", \"Jale\", \"Kaan\", \"Lale\", \"Mert\", \"Nil\", \"Oren\", \"Pia\", \"Rua\", \"Sena\", \"Tarik\", \"Una\", \"Vera\", \"Yaz\", \"Zeki\", \"Aras\", \"Bel\", \"Ece\", \"Ira\", \"Mira\", \"Nehir\", \"Ozan\", \"Tuna\")" } },
         "age": { "type": "number", "min": 0, "default": { "expr": "rand_int(16, 45)" }, "description": "Years." },
-        "determination": { "type": "number", "min": 0, "max": 1, "default": { "expr": "round(rand_range(0.2, 0.8) * 100) / 100" }, "description": "How strongly they stick with what they are doing (ADR-0016)." }
+        "determination": { "type": "number", "min": 0, "max": 1, "default": { "expr": "round(rand_range(0.1, 0.9) * 100) / 100" }, "description": "How strongly they stick with what they are doing (ADR-0016)." }
       }
     },
     "Tree": {
       "kind": "entity",
       "leaf": true,
+      "memorable": true,
       "description": "A tree; a source of wood.",
       "attrs": {
         "wood": { "type": "number", "min": 0, "default": { "expr": "rand_int(4, 12)" }, "description": "Units of wood it can give." }
@@ -23,6 +25,7 @@
     "Stone": {
       "kind": "entity",
       "leaf": true,
+      "memorable": true,
       "description": "A loose stone or boulder.",
       "attrs": {
         "size": { "type": "number", "min": 1, "max": 3, "default": { "expr": "rand_int(1, 3)" } }
@@ -30,17 +33,64 @@
     },
     "Sighting": {
       "kind": "knowledge",
-      "description": "A claim that something was seen at a place and time (ADR-0015).",
+      "description": "A claim that something is at a place (ADR-0015). What it is about is the `about` edge.",
       "attrs": {
-        "subject": { "type": "number", "description": "Id of the node that was seen." },
         "x": { "type": "number" },
-        "y": { "type": "number" },
-        "asOf": { "type": "number", "description": "World time (days) the sighting was made." }
+        "y": { "type": "number" }
       }
     },
-    "Survive": { "kind": "mind", "role": "goal", "description": "Stay alive: flee danger, eat, drink, keep warm." },
-    "Shelter": { "kind": "mind", "role": "need", "description": "Having a safe place to sleep." },
-    "Explore": { "kind": "mind", "role": "action", "description": "Walk toward the unknown to learn what is there." }
+
+    "Fear": {
+      "kind": "mind",
+      "role": "need",
+      "description": "The need to feel safe. Rises fast after dark, fades by day.",
+      "start": 0,
+      "rate": { "expr": "if(night, 6, -8)" },
+      "urgentAt": 0.6
+    },
+    "Fatigue": {
+      "kind": "mind",
+      "role": "need",
+      "description": "Tiredness. Builds while active, drops while resting.",
+      "start": { "expr": "rand_range(0.1, 0.3)" },
+      "rate": { "expr": "if(doing == \"Rest\", -0.5, 0.25)" },
+      "urgentAt": 0.8
+    },
+    "Shelter": {
+      "kind": "mind",
+      "role": "need",
+      "description": "Having a safe place to sleep. Nothing meets it yet; houses come in the shelter pack.",
+      "start": { "expr": "rand_range(0.1, 0.3)" },
+      "rate": { "expr": "if(night, 0.1, 0.03)" },
+      "urgentAt": 0.8
+    },
+
+    "Survive": { "kind": "mind", "role": "goal", "tier": 1, "weight": { "expr": "needs.Fear" }, "description": "Stay alive and safe." },
+    "Recover": { "kind": "mind", "role": "goal", "tier": 2, "weight": { "expr": "needs.Fatigue * if(night, 1, 0.5)" }, "description": "Get rest." },
+    "Secure": { "kind": "mind", "role": "goal", "tier": 2, "weight": { "expr": "needs.Shelter" }, "description": "Secure a place to live." },
+    "Grow": { "kind": "mind", "role": "goal", "tier": 4, "weight": 0.3, "description": "Curiosity: see and learn the world." },
+
+    "Explore": {
+      "kind": "mind",
+      "role": "action",
+      "do": "explore",
+      "description": "Walk toward the unknown. Worth more while they know few trees (wood for a shelter); curiosity fades as the land becomes familiar.",
+      "serves": { "Secure": { "expr": "if(knows.Tree < 20, 1, 0.1)" }, "Grow": { "expr": "max(0.2, 1 - knows.Tree / 80)" } }
+    },
+    "Wander": {
+      "kind": "mind",
+      "role": "action",
+      "do": "wander",
+      "description": "Stroll around nearby.",
+      "serves": { "Grow": 0.6 }
+    },
+    "Rest": {
+      "kind": "mind",
+      "role": "action",
+      "do": "rest",
+      "description": "Stop and rest where they are. At night it is also how they stay safe.",
+      "serves": { "Survive": { "expr": "if(night, 1, 0)" }, "Recover": 1 }
+    }
   },
   "edges": {
     "knows": {
@@ -52,12 +102,17 @@
         "confidence": { "type": "number", "min": 0, "max": 1, "default": 1 }
       }
     },
+    "about": {
+      "from": "knowledge",
+      "to": "entity",
+      "description": "What a claim refers to."
+    },
     "has": {
       "from": "entity",
       "to": "mind",
-      "description": "A person has a need, goal or trait; their personal value sits on their end.",
+      "description": "A person has a need or goal. For needs, their own level (a lazy value) sits on their end.",
       "fromData": {
-        "weight": { "type": "number", "min": 0, "max": 1, "default": 0.5 }
+        "level": { "type": "number", "min": 0, "max": 1 }
       }
     }
   }

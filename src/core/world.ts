@@ -18,7 +18,26 @@ export type WorldEvent =
   | { kind: "edge.created"; edge: EdgeInit }
   | { kind: "edge.removed"; id: EdgeId }
   | { kind: "node.attrs"; id: NodeId; attrs: Attrs }
-  | { kind: "node.moved"; id: NodeId; pos: Vec2 };
+  | { kind: "node.moved"; id: NodeId; pos: Vec2 }
+  /** Merge data into one end of an edge (a person's need level, a refreshed sighting). */
+  | { kind: "edge.data"; id: EdgeId; end: "from" | "to"; data: Attrs }
+  /** A person starts doing something; walking actions carry their whole leg. */
+  | { kind: "activity"; person: NodeId; activity: Activity }
+  /** Something Molly recognised that everyone can feel: dusk, dawn. */
+  | { kind: "signal"; name: string };
+
+/** What a person is doing right now. Position while walking is computed from the leg. */
+export interface Activity {
+  readonly action: string;
+  readonly startedAt: number;
+  readonly leg?: Leg;
+}
+
+export interface Leg {
+  readonly path: readonly Vec2[];
+  readonly depart: number;
+  readonly arrive: number;
+}
 
 export interface NodeInit {
   id: NodeId;
@@ -64,6 +83,8 @@ export interface World {
   /** Types and rules from the loaded packs (Archie). */
   registry: Registry;
   readonly graph: Graph;
+  /** Current activity per person, set only by `activity` events. */
+  readonly activities: Map<NodeId, Activity>;
   readonly log: LoggedEvent[];
   readonly queue: EventQueue<Scheduled>;
 }
@@ -76,6 +97,7 @@ export function createWorld(seed: number): World {
     packs: [],
     registry: EMPTY_REGISTRY,
     graph: new Graph(),
+    activities: new Map(),
     log: [],
     queue: new EventQueue<Scheduled>(),
   };
@@ -128,6 +150,18 @@ function apply(world: World, event: WorldEvent): void {
       n.pos = event.pos;
       return;
     }
+    case "edge.data": {
+      const e = g.edge(event.id);
+      if (!e) throw new Error(`edge.data: edge ${event.id} does not exist`);
+      Object.assign(event.end === "from" ? e.fromData : e.toData, event.data);
+      return;
+    }
+    case "activity":
+      if (!g.node(event.person)) throw new Error(`activity: node ${event.person} does not exist`);
+      world.activities.set(event.person, event.activity);
+      return;
+    case "signal":
+      return;
   }
 }
 

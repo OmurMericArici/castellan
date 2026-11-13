@@ -4,7 +4,7 @@ A node-based world builder in the browser. You set up a land and a few people;
 houses, villages and their names emerge from what those people need, know and do.
 Every house and every name has a recorded cause you can read back.
 
-Status: design done for v0.1; skeleton live at https://omurmericarici.github.io/castellan/ (milestones M0–M2 done, M3 next).
+Status: design done for v0.1; skeleton live at https://omurmericarici.github.io/castellan/ (milestones M0–M3 done, M4 next).
 
 ## Docs
 

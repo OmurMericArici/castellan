@@ -1,4 +1,5 @@
-import type { Space, World } from "../core";
+import { DUSK } from "../core";
+import type { NodeId, Simulation, Space } from "../core";
 
 export type FieldView = "terrain" | string;
 
@@ -25,57 +26,106 @@ function terrainColor(space: Space, x: number, y: number): RGB {
   return mix(land, sea, water);
 }
 
-/** Draws the space into an offscreen image once; leaves are drawn on top each frame. */
-export function renderSpace(space: Space, view: FieldView): ImageData {
+/** The space as a small canvas, one pixel per cell; drawn scaled up each frame. */
+export function renderSpace(space: Space, view: FieldView): OffscreenCanvas {
   const img = new ImageData(space.width, space.height);
   const field = view === "terrain" ? undefined : space.field(view);
   for (let y = 0; y < space.height; y++) {
     for (let x = 0; x < space.width; x++) {
       const i = (y * space.width + x) * 4;
-      const c: RGB = field ? [field.at(x, y) * 255, field.at(x, y) * 255, field.at(x, y) * 255] : terrainColor(space, x, y);
+      const v = field ? field.at(x, y) * 255 : 0;
+      const c: RGB = field ? [v, v, v] : terrainColor(space, x, y);
       img.data[i] = c[0];
       img.data[i + 1] = c[1];
       img.data[i + 2] = c[2];
       img.data[i + 3] = 255;
     }
   }
-  return img;
+  const canvas = new OffscreenCanvas(space.width, space.height);
+  canvas.getContext("2d")?.putImageData(img, 0, 0);
+  return canvas;
 }
 
-const LEAF_STYLE: Record<string, { fill: string; size: number; shape: "circle" | "square" | "person" }> = {
-  Tree: { fill: "#2f5e2a", size: 0.55, shape: "circle" },
-  Stone: { fill: "#8a8a86", size: 0.45, shape: "square" },
-  Person: { fill: "#c8452f", size: 0.7, shape: "person" },
-};
+/** 0 by day, up to 1 deep at night, with a short fade around dusk and dawn. */
+export function darkness(t: number): number {
+  const f = t - Math.floor(t);
+  const fade = 0.04;
+  if (f >= DUSK) return Math.min(1, (f - DUSK) / fade + 0.2);
+  if (f < fade) return 1 - f / fade;
+  return 0;
+}
 
-export function drawWorld(ctx: CanvasRenderingContext2D, world: World, spaceImage: ImageData, scale: number): void {
+export interface DrawOptions {
+  scale: number;
+  selected?: NodeId;
+  sightRadius: number;
+}
+
+export function drawWorld(ctx: CanvasRenderingContext2D, sim: Simulation, base: OffscreenCanvas, o: DrawOptions): void {
+  const world = sim.world;
   const space = world.space;
   if (!space) return;
-  const buffer = new OffscreenCanvas(space.width, space.height);
-  buffer.getContext("2d")?.putImageData(spaceImage, 0, 0);
+  const s = o.scale;
   ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(buffer, 0, 0, space.width * scale, space.height * scale);
+  ctx.drawImage(base, 0, 0, space.width * s, space.height * s);
 
-  // People last so they sit on top.
-  const order = ["Stone", "Tree", "Person"];
-  const entities = [...world.graph.nodes({ kind: "entity" })].sort(
-    (a, b) => order.indexOf(a.type) - order.indexOf(b.type),
-  );
-  for (const n of entities) {
-    if (!n.pos) continue;
-    const style = LEAF_STYLE[n.type] ?? { fill: "#000", size: 0.5, shape: "circle" as const };
-    const x = n.pos.x * scale;
-    const y = n.pos.y * scale;
-    const r = style.size * scale;
-    ctx.fillStyle = style.fill;
+  // What the selected person knows, ringed.
+  const known = new Set<NodeId>();
+  if (o.selected !== undefined) {
+    for (const k of world.graph.edgesOf(o.selected, "knows")) {
+      for (const a of world.graph.edgesOf(k.to, "about")) known.add(a.to);
+    }
+  }
+
+  for (const n of world.graph.nodes({ kind: "entity" })) {
+    if (!n.pos || n.type === "Person") continue;
+    const x = n.pos.x * s;
+    const y = n.pos.y * s;
     ctx.beginPath();
-    if (style.shape === "square") ctx.rect(x - r, y - r, r * 2, r * 2);
-    else ctx.arc(x, y, r, 0, Math.PI * 2);
+    if (n.type === "Stone") {
+      ctx.fillStyle = "#8a8a86";
+      ctx.rect(x - s * 0.45, y - s * 0.45, s * 0.9, s * 0.9);
+    } else {
+      ctx.fillStyle = "#2f5e2a";
+      ctx.arc(x, y, s * 0.55, 0, Math.PI * 2);
+    }
     ctx.fill();
-    if (style.shape === "person") {
-      ctx.lineWidth = Math.max(1, scale * 0.25);
-      ctx.strokeStyle = "#fff4e0";
+    if (known.has(n.id)) {
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = "#ffe08a";
+      ctx.beginPath();
+      ctx.arc(x, y, s * 1.1, 0, Math.PI * 2);
       ctx.stroke();
     }
+  }
+
+  const dark = darkness(world.time);
+  if (dark > 0) {
+    ctx.fillStyle = `rgba(12, 18, 44, ${0.5 * dark})`;
+    ctx.fillRect(0, 0, space.width * s, space.height * s);
+  }
+
+  for (const p of sim.adam.people()) {
+    const pos = sim.adam.positionOf(p.id);
+    if (!pos) continue;
+    const x = pos.x * s;
+    const y = pos.y * s;
+    const resting = world.activities.get(p.id)?.action === "Rest";
+    if (p.id === o.selected) {
+      ctx.beginPath();
+      ctx.arc(x, y, o.sightRadius * s, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255, 240, 200, 0.12)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255, 240, 200, 0.6)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.arc(x, y, s * 0.75, 0, Math.PI * 2);
+    ctx.fillStyle = resting ? "#8c3a2c" : "#d04a32";
+    ctx.fill();
+    ctx.lineWidth = Math.max(1.5, s * 0.25);
+    ctx.strokeStyle = p.id === o.selected ? "#ffe08a" : "#fff4e0";
+    ctx.stroke();
   }
 }
