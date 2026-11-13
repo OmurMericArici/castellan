@@ -49,6 +49,9 @@ Current milestone: **M5** (M0–M4 done 2026-11-14).
 New ideas go here, not into the current milestone. Each one gets a date and one line.
 Moving an item into scope needs a decision record.
 
+- 2026-11-15 — Hunger and food: a hunger need, food sources (foraging, later farming), eating as an action.
+- 2026-11-15 — Anger and hostility between people: grudges as person-to-person edges, conflict actions (seed for war, ADR-0012).
+- 2026-11-15 — Imperfect memory: people recall less than they saw (a recall chance per sighting), memories fade (confidence as a lazy value, Entropy ADR-0021) and grow stronger each time the thing is seen or heard about again.
 - 2026-11-14 — Villages that merge, split or dissolve; houses that collapse when their condition hits zero; repair.
 - 2026-11-14 — Lies pack: knowledge given wrong on purpose.
 - 2026-11-14 — Knowledge drift: claims degrading into variants over time or when retold (ties to Entropy).
