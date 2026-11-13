@@ -41,3 +41,13 @@ export function hash2(a: number, b: number): number {
   h = Math.imul(h ^ (h >>> 15), 0x846ca68b);
   return (h ^ (h >>> 16)) >>> 0;
 }
+
+/** FNV-1a hash of a string to a 32-bit integer; used to salt generators by name. */
+export function hashString(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}

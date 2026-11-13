@@ -3,6 +3,19 @@
 Newest first. One entry per session: what changed, what was learned, what's next.
 Add a screenshot/GIF path whenever something is visible.
 
+## 2026-11-14 — M1 world core
+
+- Core modules: `space` (fields from seeded fBm or derived from another field), `graph` (3 node kinds,
+  typed edges stored once and read from both ends), `lazy` (values computed on read, threshold times),
+  `queue` (event heap, deterministic ties, lazy cancel), `world` (one write channel, event log with `by`,
+  `runUntil`, `replay`, `digest`), `noah` (genesis from config).
+- Technical choices recorded in ADR-0022; time unit is days.
+- 16 tests: determinism, replay from the log reproduces the world, leaves never land in water, etc.
+- UI: terrain view and per-field views, seeded via `?seed=`, "New world" button, counts.
+  Checked in Chrome: renders, no console errors.
+- Not yet: Noah placing starting knowledge (needs sightings, comes with Adam in M3).
+- **Next:** M2, Archie and the pack interpreter.
+
 ## 2026-11-14 — M0 skeleton (local)
 
 - Entropy is its own character (ADR-0021 accepted; Molly keeps meaning-making).

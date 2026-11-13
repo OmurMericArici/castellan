@@ -9,11 +9,23 @@
   <body>
     <header>
       <h1>Castellan</h1>
-      <p>A node-based world builder. Milestone M0: skeleton.</p>
+      <p>A node-based world builder. Milestone M1: Noah builds the land and places the first leaves.</p>
     </header>
     <main>
-      <canvas id="world" width="640" height="400"></canvas>
-      <p class="hint">Seed: <code id="seed"></code> · add <code>?seed=123</code> to the URL to change it.</p>
+      <div class="controls">
+        <label>View
+          <select id="view"><option value="terrain">terrain</option></select>
+        </label>
+        <button id="new-seed" type="button">New world</button>
+        <span class="hint">Seed <code id="seed"></code></span>
+      </div>
+      <canvas id="world"></canvas>
+      <p class="hint" id="summary"></p>
+      <p class="hint legend">
+        <span class="dot tree"></span> tree
+        <span class="dot stone"></span> stone
+        <span class="dot person"></span> person
+      </p>
     </main>
     <script type="module" src="./src/ui/main.ts"></script>
   </body>

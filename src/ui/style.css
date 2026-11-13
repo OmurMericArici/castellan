@@ -2,8 +2,8 @@
   --bg: #f6f3ec;
   --text: #2b2a27;
   --muted: #6b675e;
-  --ground: #dcd3bd;
-  --leaf: #4f7a3a;
+  --line: #d8d1c2;
+  --button: #ece6d8;
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
@@ -11,8 +11,8 @@
     --bg: #1b1a18;
     --text: #e9e5db;
     --muted: #a39e92;
-    --ground: #3a352b;
-    --leaf: #8fb873;
+    --line: #3d3a33;
+    --button: #2a2824;
   }
 }
 * { box-sizing: border-box; }
@@ -23,8 +23,24 @@ body {
   color: var(--text);
   font: 16px/1.5 system-ui, sans-serif;
 }
-header, main { max-width: 640px; margin: 0 auto; }
+header, main { max-width: 768px; margin: 0 auto; }
 h1 { margin: 0 0 4px; font-size: 1.8rem; }
-header p, .hint { color: var(--muted); margin: 0 0 16px; }
-canvas { display: block; width: 100%; height: auto; border-radius: 6px; }
+header p, .hint { color: var(--muted); margin: 0 0 12px; }
+.controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 12px; }
+.controls .hint { margin: 0; }
+select, button {
+  font: inherit;
+  color: var(--text);
+  background: var(--button);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 10px;
+}
+button { cursor: pointer; }
+canvas { display: block; width: 100%; height: auto; border-radius: 6px; margin-bottom: 8px; image-rendering: pixelated; }
 code { font-size: 0.9em; }
+.legend { display: flex; gap: 6px 14px; align-items: center; flex-wrap: wrap; }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: -8px; vertical-align: middle; }
+.dot.tree { background: #2f5e2a; }
+.dot.stone { background: #8a8a86; border-radius: 2px; }
+.dot.person { background: #c8452f; box-shadow: 0 0 0 2px #fff4e0; }
