@@ -42,7 +42,7 @@ Each milestone ends with something visible, a devlog entry and a screenshot or G
 | M4 | Shelter | Molly places house concepts; people gather wood and build; `livesIn` meets shelter; houses become a named village; regrowth and wear. |
 | M5 | Form and story | WFC house layouts, person story panel, timeline, Noah config in the URL, README with GIF. **v0.1 ships.** |
 
-Current milestone: **M0**.
+Current milestone: **M1** (M0 done 2026-11-14).
 
 ## Parking lot
 

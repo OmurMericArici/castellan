@@ -12,7 +12,9 @@ Add a screenshot/GIF path whenever something is visible.
 - Seeded RNG (mulberry32) with `fork(salt)` for per-node generators; 4 tests pass.
 - Placeholder page draws seeded dots; `?seed=` in the URL changes them.
 - GitHub Actions workflow tests, builds and deploys to Pages on push to `main`.
-- **Next:** create the GitHub repo and push → M0 done; then M1 world core.
+- Repo: github.com/OmurMericArici/castellan (public). First Actions run green; live at
+  https://omurmericarici.github.io/castellan/. Needed `gh auth refresh -s workflow` to push the workflow file.
+- **M0 done. Next:** M1 world core.
 
 ## 2026-11-14 — VISION and SCOPE rewritten
 
