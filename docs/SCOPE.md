@@ -7,6 +7,8 @@ and read their story. Defined in [ADR-0011](decisions/0011-first-slice.md).
 
 ## v0.1 in scope
 
+- **Behaviour in packs (M5):** step-program actions, reactions, memory rules, `meets`; proven by `hunger` and `hostility` packs and memory rules on sightings.
+
 - **Space:** small 2D map with height, water and fertility fields.
 - **Noah:** config for map size, fields, number of people, starting knowledge, seed; seed + config in the URL.
 - **Leaves:** person, tree, stone.
@@ -23,8 +25,8 @@ and read their story. Defined in [ADR-0011](decisions/0011-first-slice.md).
 
 ## v0.1 out of scope (on purpose)
 
-- Birth, ageing to death, food, multiple needs, personalities (beyond determination).
-- Sharing knowledge between people, know-how, knowledge drift, lies.
+- Birth, ageing to death, farming, personalities (beyond determination).
+- Sharing knowledge between people (telling), know-how, knowledge drift, lies.
 - Towns and above, trade, war.
 - Loading packs mid-run from the UI; an LLM pack workflow (the format must allow it, the UI can wait).
 - 3D, the learning stage.
@@ -40,18 +42,16 @@ Each milestone ends with something visible, a devlog entry and a screenshot or G
 | M2 | Archie and the interpreter | Pack format and a minimal expression language; Archie validates with clear errors; `core` types come from a pack, not code. |
 | M3 | Adam | People wander, see, explore, remember sightings, pick actions by weighted goals with determination, fear the night. |
 | M4 | Shelter | Molly places house concepts; people gather wood and build; `livesIn` meets shelter; houses become a named village; regrowth and wear. |
-| M5 | Form and story | WFC house layouts, person story panel, timeline, Noah config in the URL, README with GIF. **v0.1 ships.** |
+| M5 | Behaviour in packs | Actions are step programs, reactions fire on events, memory rules live on knowledge types, people notice each other (`meets`). Adam's hard-coded verbs are gone. `hunger`, `hostility` and memory rules work as packs written from PACKS.md alone (ADR-0026, 0027). |
+| M6 | Form and story | WFC house layouts, person story panel, timeline, Noah config in the URL, README with GIF. **v0.1 ships.** |
 
-Current milestone: **M5** (M0–M4 done 2026-11-14).
+Current milestone: **M5** (M0–M4 done 2026-11-14; M5 redefined 2026-11-15).
 
 ## Parking lot
 
 New ideas go here, not into the current milestone. Each one gets a date and one line.
 Moving an item into scope needs a decision record.
 
-- 2026-11-15 — Hunger and food: a hunger need, food sources (foraging, later farming), eating as an action.
-- 2026-11-15 — Anger and hostility between people: grudges as person-to-person edges, conflict actions (seed for war, ADR-0012).
-- 2026-11-15 — Imperfect memory: people recall less than they saw (a recall chance per sighting), memories fade (confidence as a lazy value, Entropy ADR-0021) and grow stronger each time the thing is seen or heard about again.
 - 2026-11-14 — Villages that merge, split or dissolve; houses that collapse when their condition hits zero; repair.
 - 2026-11-14 — Lies pack: knowledge given wrong on purpose.
 - 2026-11-14 — Knowledge drift: claims degrading into variants over time or when retold (ties to Entropy).

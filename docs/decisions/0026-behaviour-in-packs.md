@@ -1,6 +1,6 @@
 # 0026 — Behaviour in packs: steps, reactions, memory rules
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-11-15
 
 ## Context
@@ -72,10 +72,10 @@ the guide, the way a user or an LLM would.
 - Bigger language surface for Archie to check (targets, step order, effect paths).
 - Scope: this is a milestone of its own, before v0.1 polish (open question below).
 
-## Open
-1. Approach as above?
-2. Insert it as M5 (behaviour in packs) and move polish to M6, delaying v0.1?
-3. Include `meets` (people noticing each other, needed for hostility) now, or later?
+## Settled
+1. Approach as above.
+2. It is M5; form and story polish moves to M6, which ships v0.1.
+3. `meets` is included, so the hostility pack is part of the proof.
 
 ## Discussion
 - 2026-11-15 — User: can these new mechanics be added as packs now that everything
@@ -83,3 +83,4 @@ the guide, the way a user or an LLM would.
   definition.
 - 2026-11-15 — User stated the engine/default-pack principle (ADR-0027), which this record
   applies: Adam's hard-coded verbs and memory are debt against it. Scope questions still open.
+- 2026-11-15 — User: yes to both (M5 before v0.1, `meets` included). Accepted.
