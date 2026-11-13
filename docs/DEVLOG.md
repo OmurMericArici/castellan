@@ -3,6 +3,14 @@
 Newest first. One entry per session: what changed, what was learned, what's next.
 Add a screenshot/GIF path whenever something is visible.
 
+## 2026-11-15 — Engine, not game
+
+- Checked whether hunger, hostility and imperfect memory could be packs: they can't (actions can't
+  change needs, nothing creates relations on events, memory is hard-coded). Proposed ADR-0026:
+  actions as step programs, reactions to events, memory rules on knowledge types.
+- Principle accepted (ADR-0027): Castellan is an engine and our content is its default pack; code only
+  for what can't be expressed simply, everything else in packs.
+
 ## 2026-11-14 — M4 Shelter
 
 - New `shelter` pack (Shelter need, Secure goal, Scout/Gather/Build, House, Village); `core` no longer

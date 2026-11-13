@@ -20,6 +20,11 @@ Read `docs/SCOPE.md` (current milestone) and the latest `docs/DEVLOG.md` entry f
 - `npm run typecheck` — includes the no-DOM check for `src/core`
 - `npm run build` — typecheck + production build to `dist/`
 
+## Engine or pack? (ADR-0027)
+Castellan is an engine; our content is its default pack. Before writing engine code for a
+mechanic, ask whether it can be a pack. If not, add the smallest **general** primitive that
+makes it possible, then write the mechanic as a pack. Never hard-code a mechanic.
+
 ## Code rules
 - Use the glossary terms from `docs/VISION.md` in names and comments.
 - `src/core` has no DOM access; it is pure, seeded and tested with Vitest.

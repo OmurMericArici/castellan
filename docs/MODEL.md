@@ -24,6 +24,11 @@ A world = Noah's configuration + seed + loaded packs.
 
 ## Principles (settled)
 
+0. **Castellan is an engine; the world is its default pack.** Code only for what
+   can't be expressed simply as data; everything else is a pack, including our
+   own content. A mechanic that can't be written as a pack reveals a missing
+   general primitive. ([ADR-0027](decisions/0027-engine-and-default-pack.md))
+
 1. **The space is the root.** Everything lives in a space carrying **fields**
    (height, water, fertility, soil, temperature, …). Fields are continuous
    properties of the space; **things** (trees, stones, people) are not fields but

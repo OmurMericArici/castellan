@@ -7,6 +7,13 @@ ruins. You set up a land and a few people, and they get built because people
 need things, act on what they know, and leave traces. Every house, name and
 ruin has a recorded cause you can read back.
 
+## What it is
+
+**An engine, and a default pack.** The engine holds only what can't be said simply
+as data (pathfinding, time, perception, the pack interpreter, rendering). Everything
+the world *is* and *does* lives in packs, starting with our own default set
+([ADR-0027](decisions/0027-engine-and-default-pack.md)).
+
 ## What makes it different
 
 - **Only the basics come from outside.** Noah places the land, the first people,
