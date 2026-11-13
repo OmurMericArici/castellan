@@ -3,6 +3,19 @@
 Newest first. One entry per session: what changed, what was learned, what's next.
 Add a screenshot/GIF path whenever something is visible.
 
+## 2026-11-14 — M4 Shelter
+
+- New `shelter` pack (Shelter need, Secure goal, Scout/Gather/Build, House, Village); `core` no longer
+  mentions shelter. Pack format v0.3: `build`, `recognize`, `spread`.
+- Molly places house concepts each dawn with the fuzzy triple (need × spot × known wood × company);
+  people gather wood from trees they know, carry it, build, and move in. Villages form when finished
+  houses are close, and get a name.
+- Entropy spreads trees and wears houses down (lazy condition).
+- Bugs found by probing, not by tests: houses stalled at 8/10 wood (`plan.missing` counted carried wood);
+  empty choice lists at dawn; loners never got a plan; two villages side by side. All fixed.
+- 42 tests, including wood conservation and "same world however time is sliced". Checked in Chrome.
+- **Next:** M5: WFC house layouts, story panel polish, Noah config in the URL, README with GIF → v0.1.
+
 ## 2026-11-14 — M3 Adam
 
 - People live: event-driven walking legs (A* over the fields), sight events computed ahead along each leg,

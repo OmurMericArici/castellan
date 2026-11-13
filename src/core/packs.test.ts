@@ -59,7 +59,7 @@ describe("Archie's pack check", () => {
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.registry.types.get("Person")?.leaf).toBe(true);
-      expect(r.registry.types.get("Shelter")?.role).toBe("need");
+      expect(r.registry.types.get("Fatigue")?.role).toBe("need");
       expect(r.registry.edges.get("knows")?.to).toBe("knowledge");
     }
   });

@@ -1,6 +1,6 @@
 {
   "pack": "core",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "The basic things of a Castellan world: people, trees, stones, what people can know, and the first pieces of a mind.",
   "types": {
     "Person": {
@@ -10,14 +10,16 @@
       "attrs": {
         "name": { "type": "string", "default": { "expr": "pick(\"Ayla\", \"Bora\", \"Cem\", \"Defne\", \"Eda\", \"Fen\", \"Gül\", \"Ilka\", \"Jale\", \"Kaan\", \"Lale\", \"Mert\", \"Nil\", \"Oren\", \"Pia\", \"Rua\", \"Sena\", \"Tarik\", \"Una\", \"Vera\", \"Yaz\", \"Zeki\", \"Aras\", \"Bel\", \"Ece\", \"Ira\", \"Mira\", \"Nehir\", \"Ozan\", \"Tuna\")" } },
         "age": { "type": "number", "min": 0, "default": { "expr": "rand_int(16, 45)" }, "description": "Years." },
-        "determination": { "type": "number", "min": 0, "max": 1, "default": { "expr": "round(rand_range(0.1, 0.9) * 100) / 100" }, "description": "How strongly they stick with what they are doing (ADR-0016)." }
+        "determination": { "type": "number", "min": 0, "max": 1, "default": { "expr": "round(rand_range(0.1, 0.9) * 100) / 100" }, "description": "How strongly they stick with what they are doing (ADR-0016)." },
+        "carrying": { "type": "number", "min": 0, "default": 0, "description": "Material units in hand (set by the engine)." }
       }
     },
     "Tree": {
       "kind": "entity",
       "leaf": true,
       "memorable": true,
-      "description": "A tree; a source of wood.",
+      "description": "A tree; a source of wood. New ones spread near old ones on fertile land.",
+      "spread": { "every": 2, "count": 4, "radius": 4, "field": "fertility" },
       "attrs": {
         "wood": { "type": "number", "min": 0, "default": { "expr": "rand_int(4, 12)" }, "description": "Units of wood it can give." }
       }
@@ -56,26 +58,16 @@
       "rate": { "expr": "if(doing == \"Rest\", -0.5, 0.25)" },
       "urgentAt": 0.8
     },
-    "Shelter": {
-      "kind": "mind",
-      "role": "need",
-      "description": "Having a safe place to sleep. Nothing meets it yet; houses come in the shelter pack.",
-      "start": { "expr": "rand_range(0.1, 0.3)" },
-      "rate": { "expr": "if(night, 0.1, 0.03)" },
-      "urgentAt": 0.8
-    },
-
     "Survive": { "kind": "mind", "role": "goal", "tier": 1, "weight": { "expr": "needs.Fear" }, "description": "Stay alive and safe." },
     "Recover": { "kind": "mind", "role": "goal", "tier": 2, "weight": { "expr": "needs.Fatigue * if(night, 1, 0.5)" }, "description": "Get rest." },
-    "Secure": { "kind": "mind", "role": "goal", "tier": 2, "weight": { "expr": "needs.Shelter" }, "description": "Secure a place to live." },
     "Grow": { "kind": "mind", "role": "goal", "tier": 4, "weight": 0.3, "description": "Curiosity: see and learn the world." },
 
     "Explore": {
       "kind": "mind",
       "role": "action",
       "do": "explore",
-      "description": "Walk toward the unknown. Worth more while they know few trees (wood for a shelter); curiosity fades as the land becomes familiar.",
-      "serves": { "Secure": { "expr": "if(knows.Tree < 20, 1, 0.1)" }, "Grow": { "expr": "max(0.2, 1 - knows.Tree / 80)" } }
+      "description": "Walk toward the unknown. Curiosity fades as the land becomes familiar.",
+      "serves": { "Grow": { "expr": "max(0.2, 1 - knows.Tree / 80)" } }
     },
     "Wander": {
       "kind": "mind",
@@ -88,7 +80,7 @@
       "kind": "mind",
       "role": "action",
       "do": "rest",
-      "description": "Stop and rest where they are. At night it is also how they stay safe.",
+      "description": "Rest; at home if they have one (they walk back first). At night it is also how they stay safe.",
       "serves": { "Survive": { "expr": "if(night, 1, 0)" }, "Recover": 1 }
     }
   },

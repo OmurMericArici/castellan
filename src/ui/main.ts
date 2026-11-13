@@ -1,6 +1,7 @@
 import { clockLabel, createSimulation, createWorld, DEFAULT_ADAM, genesis, isNight, loadPacks } from "../core";
 import type { NodeId } from "../core";
 import CORE from "../packs/core.json";
+import SHELTER from "../packs/shelter.json";
 import { DEFAULT_NOAH } from "./noah-default";
 import { drawWorld, renderSpace } from "./render";
 import { StoryBook } from "./story";
@@ -27,7 +28,7 @@ $<HTMLElement>("#seed").textContent = String(seed);
 
 const world = createWorld(seed);
 try {
-  loadPacks(world, [CORE]);
+  loadPacks(world, [CORE, SHELTER]);
 } catch (e) {
   // Archie's message lists every problem with its place in the pack.
   summary.textContent = e instanceof Error ? e.message : String(e);
@@ -72,7 +73,7 @@ canvas.addEventListener("click", (ev) => {
   if (best) selected = best.id;
 });
 
-const LABEL: Record<string, string> = { Explore: "exploring", Wander: "wandering", Rest: "resting" };
+const LABEL: Record<string, string> = { Explore: "exploring", Wander: "wandering", Rest: "resting", Scout: "scouting for trees", Gather: "gathering wood", Build: "building" };
 
 function renderPanel(): void {
   if (selected === undefined) return;
@@ -84,9 +85,19 @@ function renderPanel(): void {
     .map(([n, v]) => `<div class="need"><span>${n}</span><meter min="0" max="1" low="0.4" high="0.7" optimum="0" value="${v.toFixed(3)}"></meter></div>`)
     .join("");
   const lines = story.lines(selected).map((l) => `<li>${l}</li>`).join("");
+  const home = world.graph.edgesOf(selected, "livesIn").find((e) => e.from === selected);
+  const village = home ? world.graph.edgesOf(home.to, "memberOf").map((e) => world.graph.node(e.to))[0] : undefined;
+  const plan = world.graph.edgesOf(selected, "builds").map((e) => world.graph.node(e.to)).find((n) => n?.attrs["state"] === "planned");
+  const carrying = typeof p.attrs["carrying"] === "number" ? p.attrs["carrying"] : 0;
+  const homeLine = home
+    ? `lives in a house${village ? ` in ${String(village.attrs["name"])}` : ""}`
+    : plan
+      ? `building a house: ${String(plan.attrs["stock"])}/10 wood at the site${carrying ? `, carrying ${carrying}` : ""}`
+      : "no home yet";
   panel.innerHTML = `
     <h2>${String(p.attrs["name"] ?? `Person ${p.id}`)}</h2>
     <p class="hint">${String(p.attrs["age"])} years · determination ${String(p.attrs["determination"])} · ${doing ? LABEL[doing] ?? doing : "—"} · knows ${sim.adam.knownCount(selected)} things</p>
+    <p class="hint">${homeLine}</p>
     <div class="needs">${bars}</div>
     <ol class="story">${lines}</ol>`;
 }
@@ -107,7 +118,13 @@ function frame(now: number): void {
   clock.textContent = clockLabel(world.time);
   if (now - lastPanel > 200) {
     renderPanel();
-    summary.textContent = `${sim.adam.people().length} people · ${[...world.graph.nodes({ type: "Sighting" })].length} shared sightings · ${world.log.length} events in the log`;
+    const houses = [...world.graph.nodes({ type: "House" })];
+    const builtCount = houses.filter((h) => h.attrs["state"] === "built").length;
+    const villages = [...world.graph.nodes({ type: "Village" })].map((v) => String(v.attrs["name"]));
+    summary.textContent =
+      `${sim.adam.people().length} people · ${builtCount} houses built, ${houses.length - builtCount} being built` +
+      (villages.length ? ` · villages: ${villages.join(", ")}` : "") +
+      ` · ${[...world.graph.nodes({ type: "Sighting" })].length} shared sightings · ${world.log.length} events`;
     lastPanel = now;
   }
   requestAnimationFrame(frame);

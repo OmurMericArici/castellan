@@ -42,13 +42,14 @@ Each milestone ends with something visible, a devlog entry and a screenshot or G
 | M4 | Shelter | Molly places house concepts; people gather wood and build; `livesIn` meets shelter; houses become a named village; regrowth and wear. |
 | M5 | Form and story | WFC house layouts, person story panel, timeline, Noah config in the URL, README with GIF. **v0.1 ships.** |
 
-Current milestone: **M4** (M0–M3 done 2026-11-14).
+Current milestone: **M5** (M0–M4 done 2026-11-14).
 
 ## Parking lot
 
 New ideas go here, not into the current milestone. Each one gets a date and one line.
 Moving an item into scope needs a decision record.
 
+- 2026-11-14 — Villages that merge, split or dissolve; houses that collapse when their condition hits zero; repair.
 - 2026-11-14 — Lies pack: knowledge given wrong on purpose.
 - 2026-11-14 — Knowledge drift: claims degrading into variants over time or when retold (ties to Entropy).
 - 2026-11-14 — Adam assigns personalities (trait nodes) to people.

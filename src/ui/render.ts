@@ -1,4 +1,4 @@
-import { DUSK } from "../core";
+import { DUSK, isLazy, readLazy } from "../core";
 import type { NodeId, Simulation, Space } from "../core";
 
 export type FieldView = "terrain" | string;
@@ -77,14 +77,41 @@ export function drawWorld(ctx: CanvasRenderingContext2D, sim: Simulation, base: 
     }
   }
 
+  // Villages first, as a soft ground under their houses.
+  const villageRadius = new Map<number, number>();
+  for (const v of world.graph.nodes({ kind: "entity", type: "Village" })) {
+    if (!v.pos) continue;
+    let r = 4;
+    for (const e of world.graph.edgesOf(v.id, "memberOf")) {
+      const m = world.graph.node(e.from)?.pos;
+      if (m) r = Math.max(r, Math.hypot(m.x - v.pos.x, m.y - v.pos.y) + 3);
+    }
+    villageRadius.set(v.id, r);
+    ctx.beginPath();
+    ctx.arc(v.pos.x * s, v.pos.y * s, r * s, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(240, 220, 170, 0.18)";
+    ctx.fill();
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = "rgba(255, 244, 224, 0.5)";
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
   for (const n of world.graph.nodes({ kind: "entity" })) {
-    if (!n.pos || n.type === "Person") continue;
+    if (!n.pos || n.type === "Person" || n.type === "Village") continue;
     const x = n.pos.x * s;
     const y = n.pos.y * s;
     ctx.beginPath();
+    if (n.type === "House") {
+      drawHouse(ctx, n.attrs, x, y, s, world.time);
+      continue;
+    }
     if (n.type === "Stone") {
       ctx.fillStyle = "#8a8a86";
       ctx.rect(x - s * 0.45, y - s * 0.45, s * 0.9, s * 0.9);
+    } else if (n.type === "Tree" && n.attrs["wood"] === 0) {
+      ctx.fillStyle = "#7a5a3a";
+      ctx.arc(x, y, s * 0.3, 0, Math.PI * 2);
     } else {
       ctx.fillStyle = "#2f5e2a";
       ctx.arc(x, y, s * 0.55, 0, Math.PI * 2);
@@ -127,5 +154,56 @@ export function drawWorld(ctx: CanvasRenderingContext2D, sim: Simulation, base: 
     ctx.lineWidth = Math.max(1.5, s * 0.25);
     ctx.strokeStyle = p.id === o.selected ? "#ffe08a" : "#fff4e0";
     ctx.stroke();
+    if (typeof p.attrs["carrying"] === "number" && p.attrs["carrying"] > 0) {
+      ctx.fillStyle = "#a0703f";
+      ctx.fillRect(x + s * 0.5, y - s * 1.2, s * 0.7, s * 0.7);
+    }
   }
+
+  // Village names on top of everything.
+  ctx.font = `600 ${Math.max(11, s * 2.1)}px system-ui, sans-serif`;
+  ctx.textAlign = "center";
+  for (const v of world.graph.nodes({ kind: "entity", type: "Village" })) {
+    if (!v.pos) continue;
+    const label = String(v.attrs["name"] ?? "");
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "rgba(30, 26, 20, 0.7)";
+    const ly = (v.pos.y - (villageRadius.get(v.id) ?? 9) - 0.8) * s;
+    ctx.strokeText(label, v.pos.x * s, ly);
+    ctx.fillStyle = "#fff4e0";
+    ctx.fillText(label, v.pos.x * s, ly);
+  }
+}
+
+/** Planned: dashed outline filling up with delivered wood. Built: a little house, greyer as it wears. */
+function drawHouse(ctx: CanvasRenderingContext2D, attrs: Record<string, unknown>, x: number, y: number, s: number, t: number): void {
+  const half = s * 1.1;
+  if (attrs["state"] !== "built") {
+    const stock = typeof attrs["stock"] === "number" ? attrs["stock"] : 0;
+    const fill = Math.min(1, stock / 10);
+    ctx.fillStyle = "rgba(160, 112, 63, 0.85)";
+    ctx.fillRect(x - half, y + half - 2 * half * fill, 2 * half, 2 * half * fill);
+    ctx.setLineDash([3, 3]);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = "#fff4e0";
+    ctx.strokeRect(x - half, y - half, 2 * half, 2 * half);
+    ctx.setLineDash([]);
+    return;
+  }
+  const c = attrs["condition"];
+  const condition = isLazy(c) ? readLazy(c, t) : 1;
+  const r = Math.round(120 + 40 * condition);
+  const g = Math.round(80 + 20 * condition);
+  ctx.fillStyle = `rgb(${r}, ${g}, 50)`;
+  ctx.fillRect(x - half, y - half * 0.4, 2 * half, half * 1.4);
+  ctx.beginPath();
+  ctx.moveTo(x - half * 1.25, y - half * 0.4);
+  ctx.lineTo(x, y - half * 1.35);
+  ctx.lineTo(x + half * 1.25, y - half * 0.4);
+  ctx.closePath();
+  ctx.fillStyle = "#6e3b2a";
+  ctx.fill();
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = "#2a1a12";
+  ctx.stroke();
 }

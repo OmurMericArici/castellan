@@ -45,6 +45,9 @@ code { font-size: 0.9em; }
 .dot.tree { background: #2f5e2a; }
 .dot.stone { background: #8a8a86; border-radius: 2px; }
 .dot.person { background: #c8452f; box-shadow: 0 0 0 2px #fff4e0; }
+.sq { display: inline-block; width: 10px; height: 10px; margin-right: -8px; vertical-align: middle; }
+.sq.house { background: #a06432; }
+.sq.site { border: 1.5px dashed var(--muted); }
 .ring { display: inline-block; width: 10px; height: 10px; border-radius: 50%; border: 2px solid #e0b84a; margin-right: -8px; vertical-align: middle; }
 #clock { font-variant-numeric: tabular-nums; min-width: 9.5em; }
 #person { border-top: 1px solid var(--line); padding-top: 12px; }

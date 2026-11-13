@@ -47,11 +47,64 @@ export interface ActionRule {
 }
 
 /** What Adam knows how to do physically. Packs decide when and why. */
-export const VERBS = ["explore", "wander", "rest"] as const;
+export const VERBS = ["explore", "wander", "rest", "gather", "build"] as const;
 export type Verb = (typeof VERBS)[number];
 
 /** Names a mind expression may read. */
-export const MIND_SCOPE = ["needs", "night", "knows", "self", "doing"] as const;
+export const MIND_SCOPE = ["needs", "night", "knows", "self", "doing", "plan", "carrying", "home"] as const;
+/** Fields of `plan` in mind expressions (the person's current build project). */
+export const PLAN_FIELDS = ["active", "missing", "ready"] as const;
+/** Names a build `spot` expression may read: `field.fertility` etc. at the candidate spot. */
+export const SPOT_SCOPE = ["field"] as const;
+
+/**
+ * How a derived entity comes to exist through work (ADR-0025). Molly places a
+ * concept when need, material and spot line up; a person gathers and builds it.
+ */
+export interface BuildRule {
+  /** The need it meets once built (its resident's need falls). */
+  readonly meets: string;
+  /** A memorable entity type that holds the material, and the attribute holding the amount. */
+  readonly material: string;
+  readonly materialAttr: string;
+  /** Material units needed. */
+  readonly amount: number;
+  /** Days of building once all material is there. */
+  readonly work: number;
+  /** Edge from the person to the concept they are building, and to the finished thing they live in. */
+  readonly planner: string;
+  readonly resident: string;
+  /** How much the person needs it, 0..1 (mind scope). */
+  readonly when: NumberSource;
+  /** How good a spot is, 0..1 (reads `field.*`). */
+  readonly spot: NumberSource;
+  /** Spacing from others of the same type: never closer than `min`, best within `prefer`. */
+  readonly near: { readonly min: number; readonly prefer: number };
+  /** Condition lost per day once built (Entropy). */
+  readonly wear: number;
+}
+
+/** How Molly recognises a group (ADR-0025): members close together become one node. */
+export interface RecognizeRule {
+  readonly members: string;
+  readonly radius: number;
+  /** Membership ramps from `min` members (just possible) to `full` members (certain). */
+  readonly min: number;
+  readonly full: number;
+  /** Forms at or above this degree. */
+  readonly formAt: number;
+  readonly memberEdge: string;
+}
+
+/** How Entropy spreads a leaf (new trees near old ones). */
+export interface SpreadRule {
+  /** Every this many days. */
+  readonly every: number;
+  readonly count: number;
+  readonly radius: number;
+  /** Only where this field is above 0.3. */
+  readonly field?: string;
+}
 
 export interface TypeDef {
   readonly name: string;
@@ -65,6 +118,9 @@ export interface TypeDef {
   readonly need?: NeedRule;
   readonly goal?: GoalRule;
   readonly action?: ActionRule;
+  readonly build?: BuildRule;
+  readonly recognize?: RecognizeRule;
+  readonly spread?: SpreadRule;
   readonly attrs: ReadonlyMap<string, AttrDef>;
   readonly description?: string;
 }
@@ -160,6 +216,93 @@ function numberSource(c: Checker, raw: unknown, path: string, scope: readonly st
   }
   c.err(path, `must be a number or { "expr": "..." }`);
   return undefined;
+}
+
+const ENTITY_RULE_KEYS = ["build", "recognize", "spread"] as const;
+
+function numberIn(c: Checker, obj: Obj, key: string, path: string, o: { min?: number; max?: number; int?: boolean; def?: number }): number | undefined {
+  const v = obj[key] ?? o.def;
+  const bad = typeof v !== "number" || !Number.isFinite(v) || (o.int && !Number.isInteger(v)) || (o.min !== undefined && v < o.min) || (o.max !== undefined && v > o.max);
+  if (bad) {
+    const range = o.min !== undefined && o.max !== undefined ? ` between ${o.min} and ${o.max}` : o.min !== undefined ? ` ≥ ${o.min}` : "";
+    c.err(`${path}.${key}`, `must be ${o.int ? "a whole number" : "a number"}${range}`);
+    return undefined;
+  }
+  return v as number;
+}
+
+function nameIn(c: Checker, obj: Obj, key: string, path: string): string | undefined {
+  const v = obj[key];
+  if (typeof v !== "string" || v === "") {
+    c.err(`${path}.${key}`, "must be a name");
+    return undefined;
+  }
+  return v;
+}
+
+function checkBuild(c: Checker, raw: unknown, p: string): BuildRule | undefined {
+  if (!isObj(raw)) {
+    c.err(p, "must be an object");
+    return undefined;
+  }
+  c.keys(raw, p, ["meets", "material", "materialAttr", "amount", "work", "planner", "resident", "when", "spot", "near", "wear"]);
+  const meets = nameIn(c, raw, "meets", p);
+  const material = nameIn(c, raw, "material", p);
+  const materialAttr = nameIn(c, raw, "materialAttr", p);
+  const planner = nameIn(c, raw, "planner", p);
+  const resident = nameIn(c, raw, "resident", p);
+  const amount = numberIn(c, raw, "amount", p, { min: 1, int: true });
+  const work = numberIn(c, raw, "work", p, { min: 0 });
+  const wear = numberIn(c, raw, "wear", p, { min: 0, max: 1, def: 0 });
+  const when = numberSource(c, raw["when"], `${p}.when`, MIND_SCOPE);
+  const spot = numberSource(c, raw["spot"], `${p}.spot`, SPOT_SCOPE);
+  let near: BuildRule["near"] | undefined = { min: 0, prefer: Infinity };
+  if (raw["near"] !== undefined) {
+    const n = raw["near"];
+    if (!isObj(n)) {
+      c.err(`${p}.near`, `must be an object like { "min": 3, "prefer": 8 }`);
+      near = undefined;
+    } else {
+      c.keys(n, `${p}.near`, ["min", "prefer"]);
+      const min = numberIn(c, n, "min", `${p}.near`, { min: 0 });
+      const prefer = numberIn(c, n, "prefer", `${p}.near`, { min: 0 });
+      near = min !== undefined && prefer !== undefined ? { min, prefer } : undefined;
+    }
+  }
+  if ([meets, material, materialAttr, planner, resident, amount, work, wear, when, spot, near].some((x) => x === undefined)) return undefined;
+  return { meets: meets!, material: material!, materialAttr: materialAttr!, amount: amount!, work: work!, planner: planner!, resident: resident!, when: when!, spot: spot!, near: near!, wear: wear! };
+}
+
+function checkRecognize(c: Checker, raw: unknown, p: string): RecognizeRule | undefined {
+  if (!isObj(raw)) {
+    c.err(p, "must be an object");
+    return undefined;
+  }
+  c.keys(raw, p, ["members", "radius", "min", "full", "formAt", "memberEdge"]);
+  const members = nameIn(c, raw, "members", p);
+  const memberEdge = nameIn(c, raw, "memberEdge", p);
+  const radius = numberIn(c, raw, "radius", p, { min: 0 });
+  const min = numberIn(c, raw, "min", p, { min: 1, int: true });
+  const full = numberIn(c, raw, "full", p, { min: 1, int: true });
+  const formAt = numberIn(c, raw, "formAt", p, { min: 0, max: 1, def: 0.5 });
+  if (min !== undefined && full !== undefined && full < min) c.err(`${p}.full`, `must be at least min (${min})`);
+  if ([members, memberEdge, radius, min, full, formAt].some((x) => x === undefined)) return undefined;
+  return { members: members!, memberEdge: memberEdge!, radius: radius!, min: min!, full: full!, formAt: formAt! };
+}
+
+function checkSpread(c: Checker, raw: unknown, p: string): SpreadRule | undefined {
+  if (!isObj(raw)) {
+    c.err(p, "must be an object");
+    return undefined;
+  }
+  c.keys(raw, p, ["every", "count", "radius", "field"]);
+  const every = numberIn(c, raw, "every", p, { min: 0.1 });
+  const count = numberIn(c, raw, "count", p, { min: 0, int: true });
+  const radius = numberIn(c, raw, "radius", p, { min: 0 });
+  const field = raw["field"];
+  if (field !== undefined && typeof field !== "string") c.err(`${p}.field`, "must be a field name");
+  if ([every, count, radius].some((x) => x === undefined)) return undefined;
+  return { every: every!, count: count!, radius: radius!, ...(typeof field === "string" ? { field } : {}) };
 }
 
 const MIND_KEYS: Record<MindRole, readonly string[]> = {
@@ -321,7 +464,7 @@ function checkOne(raw: unknown, index: number): { parts?: PackParts; errors: Pac
       c.err(p, `must be an object like { "kind": "entity" }`);
       continue;
     }
-    c.keys(spec, p, ["kind", "leaf", "memorable", "role", "attrs", "description", ...ALL_MIND_KEYS]);
+    c.keys(spec, p, ["kind", "leaf", "memorable", "role", "attrs", "description", ...ALL_MIND_KEYS, ...ENTITY_RULE_KEYS]);
     const kind = spec["kind"];
     if (typeof kind !== "string" || !KINDS.includes(kind as NodeKind)) {
       c.err(`${p}.kind`, `must be one of ${KINDS.join(", ")}`);
@@ -345,6 +488,26 @@ function checkOne(raw: unknown, index: number): { parts?: PackParts; errors: Pac
       for (const k of ALL_MIND_KEYS) if (k in spec) c.err(`${p}.${k}`, `only mind types have "${k}"`);
     }
     const mind = mindRole ? checkMind(c, spec, p, mindRole) : {};
+    const rules: { build?: BuildRule; recognize?: RecognizeRule; spread?: SpreadRule } = {};
+    for (const k of ENTITY_RULE_KEYS) {
+      if (spec[k] === undefined) continue;
+      if (kind !== "entity") {
+        c.err(`${p}.${k}`, `only entity types have "${k}"`);
+        continue;
+      }
+      if (k === "build") {
+        if (leaf === true) c.err(`${p}.build`, "a leaf can't have a build rule: leaves are placed, built things are derived");
+        const r = checkBuild(c, spec[k], `${p}.build`);
+        if (r) rules.build = r;
+      } else if (k === "recognize") {
+        if (leaf === true) c.err(`${p}.recognize`, "a leaf can't be recognised as a group");
+        const r = checkRecognize(c, spec[k], `${p}.recognize`);
+        if (r) rules.recognize = r;
+      } else {
+        const r = checkSpread(c, spec[k], `${p}.spread`);
+        if (r) rules.spread = r;
+      }
+    }
     const description = c.optString(spec, "description", p);
     types.push({
       name,
@@ -353,6 +516,7 @@ function checkOne(raw: unknown, index: number): { parts?: PackParts; errors: Pac
       leaf: leaf === true,
       memorable: memorable === true,
       ...mind,
+      ...rules,
       ...(mindRole ? { role: mindRole } : {}),
       attrs: checkAttrs(c, spec["attrs"], `${p}.attrs`),
       ...(description ? { description } : {}),
@@ -458,7 +622,7 @@ export function checkPacks(sources: readonly unknown[]): CheckResult {
     }
   }
   if (errors.length) return { ok: false, errors };
-  errors.push(...crossCheckMind(types));
+  errors.push(...crossCheckMind(types), ...crossCheckEntityRules(types, edges));
   if (errors.length) return { ok: false, errors };
 
   return { ok: true, registry: { packs: ordered.map((p) => ({ id: p.id, version: p.version })), types, edges } };
@@ -487,12 +651,50 @@ function crossCheckMind(types: ReadonlyMap<string, TypeDef>): PackError[] {
       if (!("expr" in src)) continue;
       for (const path of src.expr.paths) {
         const [root, name = ""] = path.split(".");
-        const list = root === "needs" ? needs : root === "knows" ? memorables : undefined;
+        const plan: readonly string[] = PLAN_FIELDS;
+        const list = root === "needs" ? needs : root === "knows" ? memorables : root === "plan" ? plan : undefined;
         if (list && !list.includes(name)) {
-          const what = root === "needs" ? "need type" : "memorable entity type";
+          const what = root === "needs" ? "need type" : root === "knows" ? "memorable entity type" : "plan field";
           errors.push({ pack: t.pack, path: `types.${t.name}.${where}`, message: `"${path}": "${name}" is not a ${what}${suggest(name, list)}` });
         }
       }
+    }
+  }
+  return errors;
+}
+
+/** Names inside build / recognise / spread rules must exist and fit. */
+function crossCheckEntityRules(types: ReadonlyMap<string, TypeDef>, edges: ReadonlyMap<string, EdgeTypeDef>): PackError[] {
+  const errors: PackError[] = [];
+  const all = [...types.values()];
+  const err = (t: TypeDef, path: string, message: string) => errors.push({ pack: t.pack, path: `types.${t.name}.${path}`, message });
+  const edgeOk = (t: TypeDef, path: string, name: string, from: string, to: string) => {
+    const e = edges.get(name);
+    if (!e) err(t, path, `edge "${name}" is not defined${suggest(name, edges.keys())}`);
+    else if ((e.from !== "any" && e.from !== from) || (e.to !== "any" && e.to !== to)) err(t, path, `edge "${name}" must go from ${from} to ${to}`);
+  };
+  for (const t of all) {
+    const b = t.build;
+    if (b) {
+      const need = types.get(b.meets);
+      if (!need || need.role !== "need") err(t, "build.meets", `"${b.meets}" is not a need type${suggest(b.meets, all.filter((x) => x.role === "need").map((x) => x.name))}`);
+      const mat = types.get(b.material);
+      if (!mat || !mat.memorable) err(t, "build.material", `"${b.material}" must be a memorable entity type (people have to find it)`);
+      else if (mat.attrs.get(b.materialAttr)?.type !== "number") err(t, "build.materialAttr", `"${b.material}" has no number attribute "${b.materialAttr}"`);
+      edgeOk(t, "build.planner", b.planner, "entity", "entity");
+      edgeOk(t, "build.resident", b.resident, "entity", "entity");
+      if ("expr" in b.when) {
+        for (const path of b.when.expr.paths) {
+          const [root, name = ""] = path.split(".");
+          if (root === "needs" && types.get(name)?.role !== "need") err(t, "build.when", `"${path}": "${name}" is not a need type`);
+        }
+      }
+    }
+    const r = t.recognize;
+    if (r) {
+      const m = types.get(r.members);
+      if (!m || m.kind !== "entity") err(t, "recognize.members", `"${r.members}" is not an entity type`);
+      edgeOk(t, "recognize.memberEdge", r.memberEdge, "entity", "entity");
     }
   }
   return errors;

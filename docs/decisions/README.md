@@ -59,3 +59,4 @@ even while the record is still proposed.
 | 0022 | [World core: time unit and data structures](0022-world-core.md) | accepted (technical) |
 | 0023 | [Expression language and pack format v0.1](0023-expression-language-and-pack-format.md) | accepted (technical) |
 | 0024 | [Adam in M3: rules in packs, verbs in the engine](0024-adam-m3.md) | accepted (technical) |
+| 0025 | [Shelter in M4: concepts, gathering, building, villages, Entropy](0025-shelter-m4.md) | accepted (technical) |
