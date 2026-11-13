@@ -1,0 +1,9 @@
+{
+  "//": "Enforces the rule that src/core never touches the DOM: no DOM lib here.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": []
+  },
+  "include": ["src/core"]
+}
