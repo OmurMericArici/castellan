@@ -10,7 +10,7 @@ This page is the whole contract, written so a person *or an LLM* can write a
 valid pack from it. Archie checks every pack before it loads and explains each
 problem with its exact place, so a failed pack can be fixed from the error alone.
 
-Format version: **0.5**: adds `extends`, `place`, `events`, traits with distributions, death, bonds with numbers, field targets, regrowing attributes, randomness in steps and reactions.
+Format version: **0.6**: adds planning over facts (`facts`, `requires`, `gives`), emotions, `scales`, `restraint`, know-how (`knowhow`, `prefer`, `teach`), telling (`tell`), remembered events (`reports`, `did`), reactions `failed` and `learned`. (0.5 added `extends`, `place`, `events`, traits, death, bonds, field targets, regrowing attributes.)
 
 ## Shape
 
@@ -38,6 +38,7 @@ Format version: **0.5**: adds `extends`, `place`, `events`, traits with distribu
 | `extends` | no | changes to types defined by packs loaded earlier (see Extending) |
 | `place` | no | how many of a leaf Noah places at the start, e.g. `{ "Bush": { "count": 70, "prefer": "fertility", "avoid": { "water": 0.05 } } }` |
 | `events` | no | named world events this pack can raise (see Events) |
+| `facts` | no | named facts about what a person believes, for planning (see Planning) |
 
 Unknown keys are errors, with a "did you mean" hint. A type or edge name can be
 defined by only one pack; to change someone else's type, use `extends`.
@@ -59,16 +60,19 @@ change the same thing with `extends`, **the one loaded later wins**.
 }
 ```
 
-`attrs` and `serves` are merged key by key; any other key (`weight`, `rate`,
+`attrs`, `serves` and `scales` are merged key by key; any other key (`weight`, `rate`,
 `steps`, `distribution`, …) is replaced. The kind of a type can't change. Errors
 in an extension are reported against the extending pack.
 
 ## What `core` gives you
 
-Types: `Person` (attrs `name`, `age`, `determination`, `carrying`), `Tree`
-(memorable, remembers `wood`), `Stone` (memorable), `Sighting` (knowledge),
-needs `Fear`, `Fatigue`, goals `Survive` (tier 1), `Recover` (2), `Grow` (4),
-actions `Explore`, `Wander`, `Rest`. Edges `knows`, `about`, `has`.
+Types: `Person` (memorable: remembered where last met; attrs `name`, `age`,
+`carrying`), `Tree` (memorable, remembers `wood`), `Stone` (memorable),
+knowledge `Sighting` and `Report` (an event), trait `Determination`, emotion
+`Fear`, need `Fatigue`, goals `Survive` (tier 1), `Recover` (2), `Grow` (4),
+methods `Explore` (gives `known.*`), `Wander`, `Rest`. Edges `knows`, `about`,
+`has`, `knowsHow`, `actor`. Reactions: a method that finished is preferred a
+little more, one that failed a little less.
 
 ## The other default packs
 
@@ -76,10 +80,11 @@ Always loaded with `core`; you may `require` and use them.
 
 | Pack | Gives |
 |---|---|
-| `shelter` | need `Shelter`, goal `Secure` (tier 2), actions `Scout`, `Gather` (wood into `Person.carrying`), `Deliver` (`carrying` → the site's `stock`), `Build`; entities `House` (build rule) and `Village` (recognised); edges `builds`, `livesIn`, `memberOf`. `home` and `plan.*` come from it. |
-| `hunger` | leaf `Bush` (memorable, remembers `food`, spreads), need `Hunger`, goal `Eat` (tier 1), actions `Forage` (eat one `food` on the spot, Hunger −0.4) and `SeekFood` |
-| `hostility` | need `Anger`, goal `Vent` (tier 3), action `Confront`, edge `grudge` (person → person), reactions on `found-empty` and `meets` |
-| `psychopathy` | trait `Psychopathy` (rare), needs `Bloodlust`, `Dread`, goal `Prey`, actions `Murder`, `Hide`, edge `hates`, event `Murder`; extends `Survive` |
+| `shelter` | need `Shelter`, goal `Secure` (tier 2), facts `hasLoad`, `siteReady`, methods `Gather` (gives `hasLoad`), `Deliver` (needs `hasLoad`, gives `siteReady`), `Build` (needs `siteReady`, serves Secure; 70% know it from birth); entities `House` (build rule) and `Village` (recognised); edges `builds`, `livesIn`, `memberOf`. `home` and `plan.*` come from it. |
+| `hunger` | leaf `Bush` (memorable, remembers `food`, spreads), need `Hunger`, goal `Eat` (tier 1), method `Forage` (eat one `food` on the spot, Hunger −0.4; knowing no bush, the planner explores) |
+| `hostility` | emotion `Anger` (wears restraint down), goal `Vent` (tier 3), methods `Confront` and `Attack` (kill; restraint 0.97), edge `grudge`, event `Murder`, reactions on `found-empty`, `meets`, `witness` |
+| `psychopathy` | trait `Psychopathy` (rare; scales restraint, fear and dread down), need `Bloodlust`, emotion `Dread`, goal `Prey`, methods `Murder`, `Hide`, edge `hates`; extends `Survive` |
+| `talk` | need `Isolation`, goal `Company` (tier 3), method `Chat` (tells 3 things and teaches a method, both ways) |
 
 Note: `Person.carrying` is shared. Shelter's `Deliver` gives whatever is carried to a building site, so a pack that also uses `carrying` for something else will mix with wood.
 
@@ -92,8 +97,9 @@ Note: `Person.carrying` is shared. Shelter's `Deliver` gives whatever is carried
 | `memorable` | entities: people remember seeing it (they form a `Sighting`) and can `goto` it by memory |
 | `remember` | memorable entities: attributes people notice and remember, readable later as `it.<attr>`. Memory can be out of date. |
 | `memory` | knowledge types: how well people remember (see Memory) |
-| `role` | mind types, required: `need`, `goal`, `action` or `trait` |
+| `role` | mind types, required: `need`, `emotion`, `goal`, `action` (a method) or `trait` |
 | `distribution` | traits: how values are spread over people (see Traits) |
+| `scales` | traits, needs, emotions: multipliers on other parts of the mind (see Scales) |
 | `attrs` | attribute definitions (see Attributes) |
 | `build`, `recognize`, `spread` | entity rules (see Entity rules) |
 | `description` | free text |
@@ -103,11 +109,76 @@ Note: `Person.carrying` is shared. Shelter's `Deliver` gives whatever is carried
 | Role | Keys | Meaning |
 |---|---|---|
 | `need` | `start`, `rate`, `urgentAt` | A level in [0, 1] per person. `start` is rolled once; `rate` is the change per day; above `urgentAt` (default 0.7) it is urgent and people re-think when they cross it. |
+| `emotion` | `start`, `rate`, `urgentAt` | Works like a need (a level that moves), read as `emotions.X` and changed with `emotions.X` effects. Use it for fast states that colour behaviour (fear, anger) rather than drives that actions satisfy. |
 | `goal` | `tier`, `weight` | `tier` 1 survive, 2 secure, 3 belong, 4 grow. `weight` in [0, 1]: how much it matters now. An urgent tier-1 goal takes over, unless determination holds the person a little longer. |
-| `action` | `steps`, `serves` | `steps`: what the action does (see Steps). `serves`: how much it helps each goal. |
+| `action` | `steps`, `serves`, `requires`, `gives`, `restraint`, `cost`, `knowhow` | A method. `steps`: what it does (see Steps). `serves`: how much it helps each goal. The rest: see Planning and Know-how. |
 
-People pick the action with the highest **sum over goals of `weight × serves`**,
-and re-think when an action ends, a need crosses a line, or Molly signals dusk/dawn.
+People score each method they know that serves a goal by the **sum over goals
+of `weight × serves`**, check they can get there (Planning), and do the first
+step. They re-think when an action ends, a need or emotion crosses a line, or
+Molly signals dusk/dawn.
+
+## Planning
+
+Methods never name each other. Each one says what must be true before it
+(`requires`) and what it makes true (`gives`); the engine chains them.
+
+```json
+"facts": { "hasLoad": "self.carrying >= 4", "siteReady": "plan.ready" },
+"types": {
+  "Build":   { "requires": ["siteReady"], "serves": { "Secure": 1 }, "steps": [ … ] },
+  "Deliver": { "requires": ["hasLoad"],   "gives": ["siteReady"],   "steps": [ … ] },
+  "Gather":  {                            "gives": ["hasLoad"],     "steps": [{ "goto": { "known": "Tree", "where": "it.wood > 0" } }, … ] }
+}
+```
+
+- A **fact** is a condition on what the person believes, declared under `facts`
+  (mind names), or one the engine reads: `known.<MemorableType>`, `linked.<edge>`,
+  `home`, `plan`, `person` (someone nearby).
+- Steps imply requirements: a `goto` that isn't `optional` and has one target
+  needs that target (`goto known Tree where …` requires `known.Tree`, checked with
+  the `where`). A `goto explore` gives `known.*`: any memorable thing.
+- When a method's facts don't hold, each missing fact becomes a sub-problem: the
+  cheapest method the person knows that `gives` it, planned the same way, with no
+  depth limit. Above: Build → no `siteReady` → Deliver → no `hasLoad` → Gather →
+  knows no tree → Explore. A method with no way to get there is not a choice.
+- A method with no `serves` is only ever done on the way to another; it needs `gives`.
+- `cost` (default 1) makes a way more or less attractive among alternatives.
+- `restraint` (0..1, mind names) holds people back: the score is multiplied by
+  `1 − restraint`, and at 1 the method is never planned. Emotions and traits can
+  scale it (see Scales).
+- The history records what each step was for (`for`), so stories read "gathered
+  wood to build a house".
+
+## Scales
+
+Traits, needs and emotions can raise or damp other parts of the mind:
+
+```json
+"Anger": { "kind": "mind", "role": "emotion", "rate": -0.4,
+  "scales": { "restraint": "1 - value * 0.4", "goal.Company": "1 - value * 0.5" } }
+```
+
+Keys: `goal.<Goal>` (its weight), `action.<Method>` (its score), `restraint`
+(every method's restraint), `restraint.<Method>`, `need.<Need>`,
+`emotion.<Emotion>`, `trait.<Trait>`. The expression reads `value`, the scaling
+type's own (unscaled) value, and gives a multiplier. All multipliers are worked
+out from unscaled values, then `traits.*`, `needs.*` and `emotions.*` read the
+scaled ones.
+
+## Know-how
+
+Methods are know-how: people only plan with methods they know.
+
+```json
+"Build": { "knowhow": { "innate": 0.7, "watch": 0.5 } }
+```
+
+- `innate`: the chance to know it from birth (default 1; may read `self`, `traits`).
+- `watch`: the chance to learn it on seeing someone do it (when they meet, or
+  when witnessing an event).
+- Effect `teach` passes a method on; effect `prefer` changes how much someone
+  prefers it (preference multiplies the score; at 0 the method is forgotten).
 
 Number values (`start`, `rate`, `weight`, `serves.*`, step amounts) are a number
 or an expression: `"needs.Hunger * 2"` (or `{ "expr": "…" }`).
@@ -116,12 +187,14 @@ or an expression: `"needs.Hunger * 2"` (or `{ "expr": "…" }`).
 
 | Name | Value |
 |---|---|
-| `needs.Fear` | the person's level of a need |
+| `needs.Hunger` | the person's level of a need |
+| `emotions.Fear` | the person's level of an emotion |
+| `reports.Murder` | how many events of that kind they know of |
 | `knows.Tree` | how many things of a memorable type they know |
 | `night` | true from dusk (21:00) to dawn (06:00) |
 | `doing` | name of their current action |
 | `self.age`, `self.id` | the person's attributes and id |
-| `traits.Psychopathy` | the person's value of a trait (fixed for life) |
+| `traits.Psychopathy` | the person's value of a trait (drawn once; scales can raise or damp it) |
 | `links.grudge` | how many edges of that type the person has to living others |
 | `field.water` | a field's value where the person stands |
 | `plan.active`, `plan.missing`, `plan.ready`, `plan.workLeft` | their building project: whatever they are building under any `build` rule (one at a time) |
@@ -131,7 +204,11 @@ or an expression: `"needs.Hunger * 2"` (or `{ "expr": "…" }`).
 | `other.<attr>`, `other.id` | in reactions: the other person (`meets`; the actor of a `witness`/`hears` event) |
 | `rel.<edge>` | true if the person has that edge to the other person (reactions; `person` targets) |
 | `bond.<edge>.<field>` | the person's own data on that edge to the other person or target (0 if none) |
-| `action` | in reactions to `finished`: the action that ended |
+| `did.Murder` | true if the person knows the other did that (reactions; `person` targets) |
+| `action` | in reactions to `finished`/`failed`: the action that ended; in `witness`: what the actor was doing |
+| `reason` | in `failed`: why it ended (`nothing to go to`, `found it empty`, …) |
+| `method` | in `learned`: the method just learned |
+| `preference` | in a `prefer` amount: the current preference for that method |
 | `event.name`, `event.known` | in `witness`/`hears`: which event, and whether the culprit is known |
 
 Random functions (`rand()`, `rand_range`, `rand_int`, `pick`) also work in steps,
@@ -200,13 +277,16 @@ Used by the `effect` step and by reactions. Keys:
 
 | Key | Value | Does |
 |---|---|---|
-| `"needs.<Need>"` | number or expression | **adds** to the person's need (use a negative number to lower it) |
-| `"other.needs.<Need>"`, `"target.needs.<Need>"` | number or expression | adds to the other person's / the target person's need |
+| `"needs.<Need>"`, `"emotions.<Emotion>"` | number or expression | **adds** to the person's need or emotion (use a negative number to lower it) |
+| `"other.needs.<Need>"`, `"target.emotions.<Emotion>"`, … | number or expression | adds to the other person's / the target person's need or emotion |
 | `"self.<attr>"`, `"target.<attr>"`, `"other.<attr>"` | number or expression | sets that attribute (in reactions `target` is the thing involved) |
 | `"link"` | `{ "edge": "friend", "to": "other", "mutual": true, "add": { "warmth": 1 } }` | adds an edge from the person if missing; `to` is `"target"`, `"other"`, or an id expression (`"it.lastTakenBy"`); `mutual` also adds it back from them; `add` / `set` change the edge's data on each side |
 | `"unlink"` | `{ "edge": "friend", "to": "other", "mutual": true }` | removes it |
 | `"kill"` | `"target"`, `"other"` or an id expression | the person dies: they stay in the world's history but stop acting |
 | `"event"` | `{ "name": "Murder", "about": "target" }` | raises a world event declared under `events`; Molly decides who notices |
+| `"prefer"` | `{ "method": "action", "add": -0.2, "on": "other" }` | changes a preference (`method`: a name, or `"action"`); at 0 the method is forgotten |
+| `"teach"` | `{ "to": "target", "method": "any", "mutual": true }` | passes on a method the person knows and the other doesn't |
+| `"tell"` | `{ "to": "target", "what": "any", "count": 3, "mutual": true }` | passes on what they know: places of a memorable type, events of a name, or `"any"`; newest first. A told event reaches the listener as `hears`. |
 
 ## Reactions
 
@@ -222,6 +302,8 @@ A reaction runs effects when something happens to a person.
 | `meets` | another person comes within sight | `other`, `rel` |
 | `found-empty` | a `take` found nothing where they remembered something | `it` |
 | `finished` | an action ended normally | `action` |
+| `failed` | an action ended early (nowhere to go, found empty, a failing `if`, lost the person) | `action`, `reason` |
+| `learned` | they learned a method (watching, being taught) | `method`, `other` (who from) |
 | `dusk`, `dawn` | Molly's day signals | |
 | `witness` | they saw an event happen (within its `seenWithin`) | `it` (who/what it was about), `other` (who did it), `event` |
 | `hears` | they heard of an event (per its `heard` rule) | `it`, `event`; `other` only if someone saw who did it (`event.known`) |
@@ -238,10 +320,12 @@ people standing together don't meet over and over.
 "events": { "Murder": { "seenWithin": 7, "heard": "everyone" } }
 ```
 
-An `event` effect raises it. Molly records it in the history (with who saw it),
-then: people within `seenWithin` cells get `witness`; everyone else gets `hears`
-if `heard` is `"everyone"`, or only people of the same village if `"village"`
-(`"nobody"`: no one else).
+An `event` effect raises it. Molly records it in the history (with who saw it)
+and makes it a shared `Report` claim (with who did it, if anyone saw). People
+within `seenWithin` cells get `witness` and know the claim; everyone else gets
+`hears` if `heard` is `"everyone"`, or only people of the same village if
+`"village"` (`"nobody"`: no one else). Witnesses may also pick up the method by
+watching. `tell` spreads Reports further.
 
 ## Memory
 
@@ -320,7 +404,7 @@ Limits: 500 characters, nesting depth 48, 10 000 steps.
 
 1. `requires: ["core"]`.
 2. Things in the world: entity types; `leaf` if Noah may place them; `memorable` + `remember` if people should find them by memory.
-3. A need (how it rises and falls), a goal that weighs it, actions whose `steps` do something about it and whose `serves` say when.
+3. A need (how it rises and falls), a goal that weighs it, methods whose `steps` do something about it and whose `serves` say when. If a method needs something first, write it as a fact in `requires` and let another method `give` it; don't write "when they don't know X, explore" by hand.
 4. Reactions for what should happen on its own (anger on meeting someone, a grudge when a tree is found empty).
 5. Load it; fix whatever Archie reports, using the paths in its messages.
 

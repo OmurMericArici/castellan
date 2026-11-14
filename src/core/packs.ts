@@ -21,7 +21,7 @@ export interface AttrDef {
   readonly description?: string;
 }
 
-export type MindRole = "need" | "goal" | "action" | "trait";
+export type MindRole = "need" | "emotion" | "goal" | "action" | "trait";
 
 /** A number written as a literal or an expression. */
 export type NumberSource = { literal: number } | { expr: Compiled };
@@ -46,6 +46,29 @@ export interface ActionRule {
   readonly steps: readonly Step[];
   /** How much the action helps each goal. */
   readonly serves: ReadonlyMap<string, NumberSource>;
+  /** Facts that must hold before it can be done, besides those its steps imply (ADR-0033). */
+  readonly requires: readonly string[];
+  /** Facts it makes true; `known.*` means it can make the person know any memorable thing. */
+  readonly gives: readonly string[];
+  /** What holds people back from it, 0..1 (1: never). Emotions and traits can scale it. */
+  readonly restraint?: NumberSource;
+  /** Planning cost (default 1); divided by the person's preference for the method. */
+  readonly cost: number;
+  /** Who knows the method: the chance to know it from birth, and to learn it by watching. */
+  readonly knowhow: KnowHow;
+}
+
+/** Methods are know-how (ADR-0032): known from birth by some, learned by watching or being taught. */
+export interface KnowHow {
+  readonly innate: NumberSource;
+  readonly watch: number;
+}
+
+/** A named fact about what a person believes, written as an expression (ADR-0033). */
+export interface FactDef {
+  readonly name: string;
+  readonly pack: string;
+  readonly expr: Compiled;
 }
 
 /** Where a `goto` step leads. */
@@ -78,7 +101,8 @@ export type Ref = { readonly kind: "target" } | { readonly kind: "other" } | { r
 export type Who = "self" | "target" | "other";
 
 export type Effect =
-  | { readonly kind: "need"; readonly on: Who; readonly need: string; readonly delta: NumberSource }
+  /** Adds to a need's or an emotion's level. */
+  | { readonly kind: "need"; readonly on: Who; readonly need: string; readonly role: "need" | "emotion"; readonly delta: NumberSource }
   | { readonly kind: "set"; readonly on: Who; readonly attr: string; readonly value: NumberSource }
   | {
       readonly kind: "link" | "unlink";
@@ -91,6 +115,12 @@ export type Effect =
       readonly set: ReadonlyMap<string, NumberSource>;
     }
   | { readonly kind: "kill"; readonly who: Ref }
+  /** Changes how much someone prefers a method; at 0 they forget it. `method: "action"` means the action that just ended. */
+  | { readonly kind: "prefer"; readonly on: Who; readonly method: string; readonly add: NumberSource }
+  /** Passes on a method the person knows and the other doesn't ("any": a random one). */
+  | { readonly kind: "teach"; readonly to: Ref; readonly method: string; readonly mutual: boolean }
+  /** Passes on knowledge: links the other to claims the person holds (ADR-0015: telling is adding a link). */
+  | { readonly kind: "tell"; readonly to: Ref; readonly what: string; readonly count: number; readonly mutual: boolean }
   | { readonly kind: "event"; readonly name: string; readonly about?: Ref };
 
 /** A world event a pack can raise; Molly decides who notices it (ADR-0030). */
@@ -107,7 +137,7 @@ export interface EventDef {
 export type Distribution = { readonly kind: "expr"; readonly expr: NumberSource } | { readonly kind: "histogram"; readonly bins: readonly (readonly [number, number, number])[] };
 
 /** Events a pack can react to. */
-export const REACTION_EVENTS = ["sees", "meets", "found-empty", "finished", "dusk", "dawn", "witness", "hears"] as const;
+export const REACTION_EVENTS = ["sees", "meets", "found-empty", "finished", "failed", "dusk", "dawn", "witness", "hears", "learned"] as const;
 export type ReactionEvent = (typeof REACTION_EVENTS)[number];
 
 export interface Reaction {
@@ -131,15 +161,17 @@ export interface MemoryRule {
 }
 
 /** Names a mind expression may read. */
-export const MIND_SCOPE = ["needs", "night", "knows", "self", "doing", "plan", "home", "traits", "links", "field"] as const;
+export const MIND_SCOPE = ["needs", "emotions", "night", "knows", "reports", "self", "doing", "plan", "home", "traits", "links", "field"] as const;
 /** Inside steps the current target is readable too, and the person's bond data toward it. */
 export const STEP_SCOPE = [...MIND_SCOPE, "target", "bond"] as const;
 /** A `known` target's `where` reads what the person remembers of the thing as `it`. */
 export const WHERE_SCOPE = [...MIND_SCOPE, "it"] as const;
 /** A `person` target's `where` reads the other person as `it` and the person's edges to them. */
-export const PERSON_WHERE_SCOPE = [...MIND_SCOPE, "it", "rel", "bond"] as const;
-/** Reactions see the thing (`it`), the other person (`other`), relations and bonds to them, the finished action and the event. */
-export const REACTION_SCOPE = [...MIND_SCOPE, "it", "other", "rel", "bond", "action", "event"] as const;
+export const PERSON_WHERE_SCOPE = [...MIND_SCOPE, "it", "rel", "bond", "did"] as const;
+/** Reactions see the thing (`it`), the other person (`other`), relations and bonds to them, what they know the other did, the action and the event. */
+export const REACTION_SCOPE = [...MIND_SCOPE, "it", "other", "rel", "bond", "did", "action", "reason", "event", "method"] as const;
+/** A `scales` expression reads the scaling type's own value. */
+export const SCALE_SCOPE = ["value"] as const;
 /** Fields of `plan` in mind expressions (the person's current build project). */
 export const PLAN_FIELDS = ["active", "missing", "ready", "workLeft"] as const;
 /** Names a build `spot` expression may read: `field.fertility` etc. at the candidate spot. */
@@ -209,7 +241,10 @@ export interface TypeDef {
   readonly memory?: MemoryRule;
   /** Trait types: how the value is distributed over people. */
   readonly distribution?: Distribution;
+  /** Needs and emotions: how the level moves. */
   readonly need?: NeedRule;
+  /** Needs, emotions and traits: multipliers on other parts of the mind (ADR-0033). */
+  readonly scales?: ReadonlyMap<string, NumberSource>;
   readonly goal?: GoalRule;
   readonly action?: ActionRule;
   readonly build?: BuildRule;
@@ -244,6 +279,7 @@ export interface Registry {
   readonly edges: ReadonlyMap<string, EdgeTypeDef>;
   readonly reactions: readonly Reaction[];
   readonly events: ReadonlyMap<string, EventDef>;
+  readonly facts: ReadonlyMap<string, FactDef>;
   /** Later packs override earlier ones for the same type. */
   readonly place: ReadonlyMap<string, PlaceDef>;
 }
@@ -258,7 +294,7 @@ export interface PackError {
 
 export type CheckResult = { ok: true; registry: Registry } | { ok: false; errors: PackError[] };
 
-export const EMPTY_REGISTRY: Registry = { packs: [], types: new Map(), edges: new Map(), reactions: [], events: new Map(), place: new Map() };
+export const EMPTY_REGISTRY: Registry = { packs: [], types: new Map(), edges: new Map(), reactions: [], events: new Map(), facts: new Map(), place: new Map() };
 
 export function formatPackError(e: PackError): string {
   return e.path ? `${e.pack} › ${e.path}: ${e.message}` : `${e.pack}: ${e.message}`;
@@ -267,7 +303,7 @@ export function formatPackError(e: PackError): string {
 // ------------------------------------------------------------------ helpers
 
 const KINDS: readonly NodeKind[] = ["entity", "knowledge", "mind"];
-const ROLES: readonly MindRole[] = ["need", "goal", "action", "trait"];
+const ROLES: readonly MindRole[] = ["need", "emotion", "goal", "action", "trait"];
 const ATTR_TYPES: readonly AttrType[] = ["number", "string", "boolean"];
 const PACK_ID = /^[a-z][a-z0-9-]{0,39}$/;
 const VERSION = /^\d+\.\d+\.\d+$/;
@@ -421,20 +457,54 @@ function checkSpread(c: Checker, raw: unknown, p: string): SpreadRule | undefine
 }
 
 const MIND_KEYS: Record<MindRole, readonly string[]> = {
-  need: ["start", "rate", "urgentAt"],
+  need: ["start", "rate", "urgentAt", "scales"],
+  emotion: ["start", "rate", "urgentAt", "scales"],
   goal: ["tier", "weight"],
-  action: ["steps", "serves"],
-  trait: ["distribution"],
+  action: ["steps", "serves", "requires", "gives", "restraint", "cost", "knowhow"],
+  trait: ["distribution", "scales"],
 };
-const ALL_MIND_KEYS: readonly string[] = Object.values(MIND_KEYS).flat();
+const ALL_MIND_KEYS: readonly string[] = [...new Set(Object.values(MIND_KEYS).flat())];
+/** What a `scales` key may point at. */
+const SCALE_TARGET = /^(restraint|(goal|action|restraint|need|emotion|trait)\.[A-Z][A-Za-z0-9]*)$/;
 
-function checkMind(c: Checker, spec: Obj, p: string, role: MindRole): Pick<TypeDef, "need" | "goal" | "action" | "distribution"> {
-  for (const k of ALL_MIND_KEYS) {
-    if (k in spec && !MIND_KEYS[role].includes(k)) {
-      const owner = (Object.keys(MIND_KEYS) as MindRole[]).find((r) => MIND_KEYS[r].includes(k));
-      c.err(`${p}.${k}`, `"${k}" belongs to ${owner} types, not ${role} types`);
-    }
+function checkScales(c: Checker, raw: unknown, p: string): Map<string, NumberSource> | undefined {
+  if (raw === undefined) return undefined;
+  if (!isObj(raw)) {
+    c.err(p, `must look like { "goal.Vent": "1 + value", "restraint": "1 - value * 0.5" }`);
+    return undefined;
   }
+  const out = new Map<string, NumberSource>();
+  for (const [k, v] of Object.entries(raw)) {
+    if (!SCALE_TARGET.test(k)) {
+      c.err(`${p}.${k}`, `scales keys are "goal.<Goal>", "action.<Action>", "restraint", "restraint.<Action>", "need.<Need>", "emotion.<Emotion>" or "trait.<Trait>"`);
+      continue;
+    }
+    const src = numberSource(c, v, `${p}.${k}`, SCALE_SCOPE);
+    if (src) out.set(k, src);
+  }
+  return out;
+}
+
+function factList(c: Checker, raw: unknown, p: string): string[] {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw) || raw.some((x) => typeof x !== "string" || x === "")) {
+    c.err(p, `must be a list of fact names, e.g. ["hasLoad"]`);
+    return [];
+  }
+  return raw as string[];
+}
+
+function checkMind(c: Checker, spec: Obj, p: string, role: MindRole): Pick<TypeDef, "need" | "goal" | "action" | "distribution" | "scales"> {
+  const ownerOf = (k: string) => (Object.keys(MIND_KEYS) as MindRole[]).filter((r) => MIND_KEYS[r].includes(k)).join(" or ");
+  for (const k of ALL_MIND_KEYS) {
+    if (k in spec && !MIND_KEYS[role].includes(k)) c.err(`${p}.${k}`, `"${k}" belongs to ${ownerOf(k)} types, not ${role} types`);
+  }
+  const scales = MIND_KEYS[role].includes("scales") ? checkScales(c, spec["scales"], `${p}.scales`) : undefined;
+  const out = checkMindRole(c, spec, p, role);
+  return scales && scales.size ? { ...out, scales } : out;
+}
+
+function checkMindRole(c: Checker, spec: Obj, p: string, role: MindRole): Pick<TypeDef, "need" | "goal" | "action" | "distribution"> {
   if (role === "trait") {
     const raw = spec["distribution"];
     if (raw === undefined) return {};
@@ -455,7 +525,7 @@ function checkMind(c: Checker, spec: Obj, p: string, role: MindRole): Pick<TypeD
     const expr = numberSource(c, raw, `${p}.distribution`, ["self"]);
     return expr ? { distribution: { kind: "expr", expr } } : {};
   }
-  if (role === "need") {
+  if (role === "need" || role === "emotion") {
     const start = spec["start"] === undefined ? { literal: 0 } : numberSource(c, spec["start"], `${p}.start`, ["self"]);
     const rate = spec["rate"] === undefined ? { literal: 0 } : numberSource(c, spec["rate"], `${p}.rate`, MIND_SCOPE);
     const urgentAt = spec["urgentAt"] ?? 0.7;
@@ -473,7 +543,10 @@ function checkMind(c: Checker, spec: Obj, p: string, role: MindRole): Pick<TypeD
     const steps = checkSteps(c, spec["steps"], `${p}.steps`);
     const serves = new Map<string, NumberSource>();
     const raw = spec["serves"];
-    if (!isObj(raw)) {
+    // No `serves`: a method only ever done on the way to another (ADR-0033); it then needs `gives`.
+    if (raw === undefined) {
+      if (spec["gives"] === undefined && !impliedGives(steps ?? []).length) c.err(p, `an action needs "serves" (which goals it helps) or "gives" (which facts it makes true for other methods)`);
+    } else if (!isObj(raw)) {
       c.err(`${p}.serves`, `must be an object like { "Survive": 1 }`);
     } else {
       for (const [goal, v] of Object.entries(raw)) {
@@ -481,7 +554,22 @@ function checkMind(c: Checker, spec: Obj, p: string, role: MindRole): Pick<TypeD
         if (src) serves.set(goal, src);
       }
     }
-    return steps ? { action: { steps, serves } } : {};
+    const requires = factList(c, spec["requires"], `${p}.requires`);
+    const gives = factList(c, spec["gives"], `${p}.gives`);
+    const restraint = spec["restraint"] === undefined ? undefined : numberSource(c, spec["restraint"], `${p}.restraint`, MIND_SCOPE);
+    const cost = numberIn(c, spec, "cost", p, { min: 0.01, def: 1 }) ?? 1;
+    let knowhow: KnowHow = { innate: { literal: 1 }, watch: 0 };
+    const kh = spec["knowhow"];
+    if (kh !== undefined) {
+      if (!isObj(kh)) c.err(`${p}.knowhow`, `must look like { "innate": 0.5, "watch": 0.3 }`);
+      else {
+        c.keys(kh, `${p}.knowhow`, ["innate", "watch"]);
+        const innate = kh["innate"] === undefined ? { literal: 1 } : numberSource(c, kh["innate"], `${p}.knowhow.innate`, ["self", "traits"]);
+        const watch = numberIn(c, kh, "watch", `${p}.knowhow`, { min: 0, max: 1, def: 0 });
+        if (innate && watch !== undefined) knowhow = { innate, watch };
+      }
+    }
+    return steps ? { action: { steps, serves, requires, gives, ...(restraint ? { restraint } : {}), cost, knowhow } } : {};
   }
   return {};
 }
@@ -567,6 +655,7 @@ interface PackParts {
   reactions: Reaction[];
   events: EventDef[];
   place: PlaceDef[];
+  facts: FactDef[];
 }
 
 function checkOne(raw: unknown, index: number): { parts?: PackParts; errors: PackError[] } {
@@ -574,7 +663,7 @@ function checkOne(raw: unknown, index: number): { parts?: PackParts; errors: Pac
   const idRaw = raw["pack"];
   const id = typeof idRaw === "string" ? idRaw : `(pack #${index + 1})`;
   const c = new Checker(id);
-  c.keys(raw, "", ["pack", "version", "description", "requires", "types", "extends", "edges", "reactions", "events", "place"]);
+  c.keys(raw, "", ["pack", "version", "description", "requires", "types", "extends", "edges", "reactions", "events", "place", "facts"]);
 
   if (typeof idRaw !== "string" || !PACK_ID.test(idRaw)) {
     c.err("pack", `the pack id must be lowercase letters, digits and dashes, starting with a letter (e.g. "firearms")`);
@@ -769,8 +858,20 @@ function checkOne(raw: unknown, index: number): { parts?: PackParts; errors: Pac
     if (count !== undefined) place.push({ type, pack: id, count, ...(typeof prefer === "string" ? { prefer } : {}), avoid });
   }
 
+  const facts: FactDef[] = [];
+  const rawFacts = raw["facts"];
+  if (rawFacts !== undefined && !isObj(rawFacts)) c.err("facts", `must look like { "hasLoad": "self.carrying >= 4" }`);
+  for (const [name, src] of Object.entries(isObj(rawFacts) ? rawFacts : {})) {
+    if (!MEMBER_NAME.test(name)) {
+      c.err(`facts.${name}`, "fact names are camelCase, e.g. hasLoad");
+      continue;
+    }
+    const expr = condition(c, src, `facts.${name}`, MIND_SCOPE);
+    if (expr) facts.push({ name, pack: id, expr });
+  }
+
   if (c.errors.length) return { errors: c.errors };
-  return { parts: { id, version: version as string, requires, types, edges, reactions, events, place }, errors: [] };
+  return { parts: { id, version: version as string, requires, types, edges, reactions, events, place, facts }, errors: [] };
 }
 
 /**
@@ -859,6 +960,14 @@ function checkOrdered(sources: readonly unknown[]): CheckResult {
       else events.set(e.name, e);
     }
   }
+  const facts = new Map<string, FactDef>();
+  for (const p of ordered) {
+    for (const f of p.facts) {
+      const prev = facts.get(f.name);
+      if (prev) errors.push({ pack: p.id, path: `facts.${f.name}`, message: `fact "${f.name}" is already defined by pack "${prev.pack}"` });
+      else facts.set(f.name, f);
+    }
+  }
   const place = new Map<string, PlaceDef>();
   for (const p of ordered) for (const pl of p.place) place.set(pl.type, pl);
   for (const pl of place.values()) {
@@ -866,10 +975,10 @@ function checkOrdered(sources: readonly unknown[]): CheckResult {
     if (!t || t.kind !== "entity" || !t.leaf) errors.push({ pack: pl.pack, path: `place.${pl.type}`, message: `"${pl.type}" is not a leaf entity type; only leaves can be placed${suggest(pl.type, [...types.values()].filter((x) => x.leaf).map((x) => x.name))}` });
   }
   if (errors.length) return { ok: false, errors };
-  errors.push(...crossCheckMind(types), ...crossCheckEntityRules(types, edges), ...crossCheckBehaviour(types, edges, reactions, events));
+  errors.push(...crossCheckMind(types), ...crossCheckEntityRules(types, edges), ...crossCheckBehaviour(types, edges, reactions, events), ...crossCheckPlanning(types, edges, facts));
   if (errors.length) return { ok: false, errors };
 
-  return { ok: true, registry: { packs: ordered.map((p) => ({ id: p.id, version: p.version })), types, edges, reactions, events, place } };
+  return { ok: true, registry: { packs: ordered.map((p) => ({ id: p.id, version: p.version })), types, edges, reactions, events, facts, place } };
 }
 
 /** Names used inside mind expressions and `serves` must exist across all loaded packs. */
@@ -879,12 +988,14 @@ function crossCheckMind(types: ReadonlyMap<string, TypeDef>): PackError[] {
   const names = (pred: (t: TypeDef) => boolean) => all.filter(pred).map((t) => t.name);
   const goals = names((t) => t.role === "goal");
   const needs = names((t) => t.role === "need");
+  const emotions = names((t) => t.role === "emotion");
   const memorables = names((t) => t.memorable);
 
   for (const t of all) {
     const sources: [string, NumberSource][] = [];
     if (t.need) sources.push(["rate", t.need.rate]);
     if (t.goal) sources.push(["weight", t.goal.weight]);
+    if (t.action?.restraint) sources.push(["restraint", t.action.restraint]);
     for (const [goal, src] of t.action?.serves ?? []) {
       sources.push([`serves.${goal}`, src]);
       if (!goals.includes(goal)) {
@@ -896,10 +1007,11 @@ function crossCheckMind(types: ReadonlyMap<string, TypeDef>): PackError[] {
       for (const path of src.expr.paths) {
         const [root, name = ""] = path.split(".");
         const plan: readonly string[] = PLAN_FIELDS;
-        const list = root === "needs" ? needs : root === "knows" ? memorables : root === "plan" ? plan : undefined;
+        const list = root === "needs" ? needs : root === "emotions" ? emotions : root === "knows" ? memorables : root === "plan" ? plan : undefined;
         if (list && !list.includes(name)) {
-          const what = root === "needs" ? "need type" : root === "knows" ? "memorable entity type" : "plan field";
-          errors.push({ pack: t.pack, path: `types.${t.name}.${where}`, message: `"${path}": "${name}" is not a ${what}${suggest(name, list)}` });
+          const what = root === "needs" ? "need type" : root === "emotions" ? "emotion type" : root === "knows" ? "memorable entity type" : "plan field";
+          const moved = root === "needs" && emotions.includes(name) ? ` ("${name}" is an emotion now: use emotions.${name})` : "";
+          errors.push({ pack: t.pack, path: `types.${t.name}.${where}`, message: `"${path}": "${name}" is not a ${what}${moved}${suggest(name, list)}` });
         }
       }
     }
@@ -1063,18 +1175,52 @@ function checkEffects(c: Checker, raw: unknown, path: string, scope: readonly st
       out.push({ kind: "event", name: v["name"], ...(about ? { about } : {}) });
       continue;
     }
+    if (key === "prefer") {
+      if (!isObj(v) || typeof v["method"] !== "string") {
+        c.err(p, `must look like { "method": "Attack", "add": -0.2 } (method "action": the action that just ended)`);
+        continue;
+      }
+      c.keys(v, p, ["method", "add", "on"]);
+      const on = v["on"] ?? "self";
+      if (on !== "self" && on !== "other" && on !== "target") c.err(`${p}.on`, `must be "self", "other" or "target"`);
+      const add = numberSource(c, v["add"] ?? 0.1, `${p}.add`, [...scope, "preference"]);
+      if (add) out.push({ kind: "prefer", on: on as Who, method: v["method"], add });
+      continue;
+    }
+    if (key === "teach" || key === "tell") {
+      if (!isObj(v)) {
+        c.err(p, key === "teach" ? `must look like { "to": "other", "method": "any" }` : `must look like { "to": "other", "what": "any", "count": 2 }`);
+        continue;
+      }
+      c.keys(v, p, key === "teach" ? ["to", "method", "mutual"] : ["to", "what", "count", "mutual"]);
+      const to = checkRef(c, v["to"] ?? "other", `${p}.to`, scope);
+      const mutual = v["mutual"] === true;
+      if (key === "teach") {
+        const method = v["method"] ?? "any";
+        if (typeof method !== "string") c.err(`${p}.method`, `must be an action name or "any"`);
+        else if (to) out.push({ kind: "teach", to, method, mutual });
+      } else {
+        const what = v["what"] ?? "any";
+        const count = numberIn(c, v, "count", p, { min: 1, int: true, def: 1 });
+        if (typeof what !== "string") c.err(`${p}.what`, `must be a memorable type, an event name or "any"`);
+        else if (to && count !== undefined) out.push({ kind: "tell", to, what, count, mutual });
+      }
+      continue;
+    }
     const parts = key.split(".");
     const [root, a, b] = parts;
-    const who: Who | undefined = root === "needs" ? "self" : root === "self" || root === "target" || root === "other" ? root : undefined;
-    const isNeed = root === "needs" ? parts.length === 2 : a === "needs" && parts.length === 3;
-    const isSet = root !== "needs" && a !== "needs" && parts.length === 2;
+    const level = (x: string | undefined) => x === "needs" || x === "emotions";
+    const who: Who | undefined = level(root) ? "self" : root === "self" || root === "target" || root === "other" ? root : undefined;
+    const isNeed = level(root) ? parts.length === 2 : level(a) && parts.length === 3;
+    const isSet = !level(root) && !level(a) && parts.length === 2;
     if (!who || !(isNeed || isSet)) {
-      c.err(p, `effect keys are "needs.<Need>", "other.needs.<Need>", "target.needs.<Need>", "self.<attr>", "target.<attr>", "other.<attr>", "link", "unlink", "kill" or "event"`);
+      c.err(p, `effect keys are "needs.<Need>", "emotions.<Emotion>", "other.needs.<Need>", "target.emotions.<Emotion>", "self.<attr>", "target.<attr>", "other.<attr>", "link", "unlink", "kill", "event", "prefer", "teach" or "tell"`);
       continue;
     }
     const value = numberSource(c, v, p, scope);
     if (!value) continue;
-    if (isNeed) out.push({ kind: "need", on: who, need: root === "needs" ? a! : b!, delta: value });
+    const role = (level(root) ? root : a) === "emotions" ? "emotion" : "need";
+    if (isNeed) out.push({ kind: "need", on: who, need: level(root) ? a! : b!, role, delta: value });
     else out.push({ kind: "set", on: who, attr: a!, value });
   }
   return out;
@@ -1160,12 +1306,26 @@ function crossCheckBehaviour(
   const errors: PackError[] = [];
   const all = [...types.values()];
   const needs = all.filter((t) => t.role === "need").map((t) => t.name);
+  const emotions = all.filter((t) => t.role === "emotion").map((t) => t.name);
   const traits = all.filter((t) => t.role === "trait").map((t) => t.name);
+  const actions = all.filter((t) => t.role === "action").map((t) => t.name);
   const edgeErr = (pack: string, path: string, name: string) =>
     errors.push({ pack, path, message: `edge "${name}" is not defined${suggest(name, edges.keys())}` });
+  const levelErr = (pack: string, path: string, root: string, name: string) => {
+    const list = root === "emotions" ? emotions : needs;
+    if (list.includes(name)) return;
+    const other = root === "emotions" ? needs : emotions;
+    const hint = other.includes(name) ? ` ("${name}" is ${root === "emotions" ? "a need: use needs" : "an emotion now: use emotions"}.${name})` : suggest(name, list);
+    errors.push({ pack, path, message: `"${name}" is not ${root === "emotions" ? "an emotion" : "a need"} type${hint}` });
+  };
   const checkEffectList = (pack: string, path: string, effects: readonly Effect[]) => {
     effects.forEach((e) => {
-      if (e.kind === "need" && !needs.includes(e.need)) errors.push({ pack, path: `${path}.needs.${e.need}`, message: `"${e.need}" is not a need type${suggest(e.need, needs)}` });
+      if (e.kind === "need") levelErr(pack, `${path}.${e.role === "emotion" ? "emotions" : "needs"}.${e.need}`, e.role === "emotion" ? "emotions" : "needs", e.need);
+      if (e.kind === "prefer" && e.method !== "action" && !actions.includes(e.method)) errors.push({ pack, path: `${path}.prefer.method`, message: `"${e.method}" is not an action type${suggest(e.method, actions)}` });
+      if (e.kind === "teach" && e.method !== "any" && !actions.includes(e.method)) errors.push({ pack, path: `${path}.teach.method`, message: `"${e.method}" is not an action type${suggest(e.method, actions)}` });
+      if (e.kind === "tell" && e.what !== "any" && !types.get(e.what)?.memorable && !events.has(e.what)) {
+        errors.push({ pack, path: `${path}.tell.what`, message: `"${e.what}" is neither a memorable entity type nor an event${suggest(e.what, [...all.filter((t) => t.memorable).map((t) => t.name), ...events.keys()])}` });
+      }
       if ((e.kind === "link" || e.kind === "unlink") && !edges.has(e.edge)) edgeErr(pack, `${path}.${e.kind}`, e.edge);
       if (e.kind === "event" && !events.has(e.name)) errors.push({ pack, path: `${path}.event`, message: `event "${e.name}" is not declared in any pack's "events"${suggest(e.name, events.keys())}` });
     });
@@ -1174,8 +1334,13 @@ function crossCheckBehaviour(
     for (const ref of expr?.paths ?? []) {
       const [root, name = ""] = ref.split(".");
       if ((root === "rel" || root === "bond" || root === "links") && !edges.has(name)) errors.push({ pack, path, message: `"${ref}": edge "${name}" is not defined${suggest(name, edges.keys())}` });
-      if (root === "needs" && !needs.includes(name)) errors.push({ pack, path, message: `"${ref}": "${name}" is not a need type${suggest(name, needs)}` });
+      if (root === "needs" || root === "emotions") {
+        const before = errors.length;
+        levelErr(pack, path, root, name);
+        if (errors.length > before) errors[errors.length - 1] = { ...errors[errors.length - 1]!, message: `"${ref}": ${errors[errors.length - 1]!.message}` };
+      }
       if (root === "traits" && !traits.includes(name)) errors.push({ pack, path, message: `"${ref}": "${name}" is not a trait type${suggest(name, traits)}` });
+      if ((root === "did" || root === "reports") && !events.has(name)) errors.push({ pack, path, message: `"${ref}": "${name}" is not an event${suggest(name, events.keys())}` });
     }
   };
   const sourcePaths = (pack: string, path: string, src: NumberSource | undefined) => {
@@ -1184,6 +1349,17 @@ function crossCheckBehaviour(
   for (const t of all) {
     if (t.need) sourcePaths(t.pack, `types.${t.name}.rate`, t.need.rate);
     if (t.goal) sourcePaths(t.pack, `types.${t.name}.weight`, t.goal.weight);
+    if (t.action?.restraint) sourcePaths(t.pack, `types.${t.name}.restraint`, t.action.restraint);
+    for (const key of t.scales?.keys() ?? []) {
+      const [what, name] = key.split(".");
+      if (!name) continue;
+      const role = what === "restraint" ? "action" : what;
+      const target = types.get(name);
+      if (target?.role !== role) {
+        const list = all.filter((x) => x.role === role).map((x) => x.name);
+        errors.push({ pack: t.pack, path: `types.${t.name}.scales.${key}`, message: `"${name}" is not ${role === "action" || role === "emotion" ? "an" : "a"} ${role} type${suggest(name, list)}` });
+      }
+    }
     for (const [g, src] of t.action?.serves ?? []) sourcePaths(t.pack, `types.${t.name}.serves.${g}`, src);
     t.action?.steps.forEach((s, i) => {
       const path = `types.${t.name}.steps[${i}]`;
@@ -1217,6 +1393,77 @@ function crossCheckBehaviour(
     const path = `reactions[${r.index}]`;
     checkEffectList(r.pack, `${path}.do`, r.effects);
     checkPaths(r.pack, `${path}.if`, r.cond);
+  }
+  return errors;
+}
+
+// ------------------------------------------------------------------ planning (ADR-0033)
+
+/**
+ * Facts a method's steps imply it needs: a `goto` that isn't optional needs somewhere
+ * to go. `known.Tree` holds when the person remembers a tree matching the step's `where`.
+ */
+export function impliedRequires(steps: readonly Step[]): { fact: string; target: Target }[] {
+  const out: { fact: string; target: Target }[] = [];
+  for (const s of steps) {
+    if (s.kind !== "goto" || s.optional) continue;
+    // Alternatives: any one will do, so only a single-target goto implies a fact.
+    if (s.targets.length !== 1) continue;
+    const t = s.targets[0]!;
+    const fact = targetFact(t);
+    if (fact) out.push({ fact, target: t });
+  }
+  return out;
+}
+
+/** The fact a goto target needs, if any. */
+export function targetFact(t: Target): string | undefined {
+  switch (t.kind) {
+    case "known":
+      return `known.${t.type}`;
+    case "linked":
+      return `linked.${t.edge}`;
+    case "home":
+    case "plan":
+    case "person":
+      return t.kind;
+    default:
+      return undefined;
+  }
+}
+
+/** Facts a method's steps imply it gives: exploring can make a person know any memorable thing. */
+export function impliedGives(steps: readonly Step[]): string[] {
+  return steps.some((s) => s.kind === "goto" && s.targets.some((t) => t.kind === "explore")) ? ["known.*"] : [];
+}
+
+/** `requires` and `gives` name facts a pack declared, or facts the engine knows how to read. */
+function crossCheckPlanning(types: ReadonlyMap<string, TypeDef>, edges: ReadonlyMap<string, EdgeTypeDef>, facts: ReadonlyMap<string, FactDef>): PackError[] {
+  const errors: PackError[] = [];
+  const all = [...types.values()];
+  const memorables = all.filter((t) => t.memorable).map((t) => t.name);
+  const valid = (f: string): boolean => {
+    if (facts.has(f) || f === "home" || f === "plan" || f === "person" || f === "known.*") return true;
+    const [root, name = ""] = f.split(".");
+    if (root === "known") return memorables.includes(name);
+    if (root === "linked") return edges.has(name);
+    return false;
+  };
+  const known = [...facts.keys(), "home", "plan", "person", "known.*", ...memorables.map((m) => `known.${m}`), ...[...edges.keys()].map((e) => `linked.${e}`)];
+  for (const t of all) {
+    if (!t.action) continue;
+    for (const key of ["requires", "gives"] as const) {
+      for (const f of t.action[key]) {
+        if (!valid(f)) errors.push({ pack: t.pack, path: `types.${t.name}.${key}`, message: `"${f}" is not a fact: declare it under "facts", or use known.<MemorableType>, known.*, linked.<edge>, home, plan or person${suggest(f, known)}` });
+      }
+    }
+  }
+  for (const f of facts.values()) {
+    for (const ref of f.expr.paths) {
+      const [root, name = ""] = ref.split(".");
+      if (root === "needs" && types.get(name)?.role !== "need") errors.push({ pack: f.pack, path: `facts.${f.name}`, message: `"${ref}": "${name}" is not a need type` });
+      if (root === "emotions" && types.get(name)?.role !== "emotion") errors.push({ pack: f.pack, path: `facts.${f.name}`, message: `"${ref}": "${name}" is not an emotion type` });
+    }
   }
   return errors;
 }
@@ -1317,7 +1564,7 @@ function mergeSpec(base: Obj, change: Obj): Obj {
   const out: Obj = { ...base };
   for (const [k, v] of Object.entries(change)) {
     const b = base[k];
-    if (["attrs", "serves"].includes(k) && isObj(b) && isObj(v)) out[k] = { ...b, ...v };
+    if (["attrs", "serves", "scales"].includes(k) && isObj(b) && isObj(v)) out[k] = { ...b, ...v };
     else out[k] = v;
   }
   return out;

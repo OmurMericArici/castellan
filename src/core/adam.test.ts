@@ -57,7 +57,9 @@ describe("Adam", () => {
     const sim = running(5);
     sim.run(4);
     const g = sim.world.graph;
+    // Things that stay put have one claim each; people are remembered where they were last seen.
     for (const subject of g.nodes({ kind: "entity" })) {
+      if (subject.type === "Person") continue;
       expect(g.edgesOf(subject.id, "about").length).toBeLessThanOrEqual(1);
     }
     const claims = [...g.nodes({ type: "Sighting" })];
@@ -88,28 +90,29 @@ describe("Adam", () => {
     expect(up.length).toBeGreaterThan(sim.adam.people().length / 2);
   });
 
-  it("lets determined people keep going a while after dark", () => {
+  it("lets determined people keep going a while after dark (determination is a trait)", () => {
     const config: NoahConfig = {
       ...CONFIG,
-      leaves: [
-        ...CONFIG.leaves.filter((l) => l.type !== "Person"),
-        { type: "Person", count: 8, attrs: { determination: 1 }, avoid: [{ field: "water", above: 0.05 }] },
-        { type: "Person", count: 8, attrs: { determination: 0 }, avoid: [{ field: "water", above: 0.05 }] },
-      ],
+      leaves: [...CONFIG.leaves.filter((l) => l.type !== "Person"), { type: "Person", count: 16, avoid: [{ field: "water", above: 0.05 }] }],
     };
-    const sim = running(11, config);
-    sim.run(DUSK + 0.3);
-    const restAt = new Map<number, number>();
-    for (const l of sim.world.log) {
-      if (l.event.kind === "activity" && l.event.activity.action === "Rest" && l.t >= DUSK && !restAt.has(l.event.person)) {
-        restAt.set(l.event.person, l.t);
+    // The same world twice: everyone fully determined, then no one.
+    const meanRest = (d: number) => {
+      const fixed = { pack: "fixed", version: "0.1.0", requires: ["core"], extends: { Determination: { distribution: { histogram: [[d, d, 1]] } } } };
+      const w = createWorld(11);
+      loadPacks(w, [CORE, fixed]);
+      genesis(w, config);
+      const sim = createSimulation(w);
+      sim.start();
+      sim.run(DUSK + 0.3);
+      expect(sim.adam.people().every((p) => sim.adam.mind(p.id).traits["Determination"] === d)).toBe(true);
+      const restAt = new Map<number, number>();
+      for (const l of w.log) {
+        if (l.event.kind === "activity" && l.event.activity.action === "Rest" && l.t >= DUSK && !restAt.has(l.event.person)) restAt.set(l.event.person, l.t);
       }
-    }
-    const mean = (d: number) => {
-      const ts = sim.adam.people().filter((p) => p.attrs["determination"] === d).map((p) => restAt.get(p.id) ?? DUSK);
+      const ts = sim.adam.people().map((p) => restAt.get(p.id) ?? DUSK);
       return ts.reduce((a, b) => a + b, 0) / ts.length;
     };
-    expect(mean(1)).toBeGreaterThan(mean(0));
+    expect(meanRest(1)).toBeGreaterThan(meanRest(0));
   });
 });
 

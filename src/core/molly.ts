@@ -126,9 +126,18 @@ export class Molly {
     };
     const witnesses = others.filter((p) => near(p.id));
     emit(w, "molly", { kind: "happened", name, actor, ...(about !== undefined ? { about } : {}), pos, witnesses: witnesses.map((p) => p.id) });
-    for (const p of witnesses) this.adam.react("witness", p.id, { ...(about !== undefined ? { it: about } : {}), other: actor, event: { name, known: true } });
-    if (def.heard === "nobody") return;
     const known = witnesses.length > 0;
+    const action = w.activities.get(actor)?.action;
+    // What people know of it is a shared claim (ADR-0033): witnesses know who did it.
+    const seen = known ? this.report(name, pos, actor, about) : undefined;
+    const rumour = !known && def.heard !== "nobody" ? this.report(name, pos, undefined, about) : undefined;
+    for (const p of witnesses) {
+      if (seen !== undefined) this.adam.linkClaim(p.id, seen);
+      // Watching someone do it can teach the method (ADR-0032).
+      this.adam.observe(p.id, actor);
+      this.adam.react("witness", p.id, { ...(about !== undefined ? { it: about } : {}), other: actor, ...(action ? { action } : {}), event: { name, known: true } });
+    }
+    if (def.heard === "nobody") return;
     const villageOf = (id: NodeId | undefined): NodeId | undefined => {
       if (id === undefined) return undefined;
       const home = this.world.graph.edgesOf(id, "livesIn").find((e) => e.from === id)?.to;
@@ -138,8 +147,22 @@ export class Molly {
     for (const p of others) {
       if (witnesses.includes(p)) continue;
       if (def.heard === "village" && (village === undefined || villageOf(p.id) !== village)) continue;
+      const claim = seen ?? rumour;
+      if (claim !== undefined) this.adam.linkClaim(p.id, claim, { confidence: 0.8 });
       this.adam.react("hears", p.id, { ...(about !== undefined ? { it: about } : {}), ...(known ? { other: actor } : {}), event: { name, known } });
     }
+  }
+
+  /** A Report claim about an event, if a pack defines the Report type. */
+  private report(name: string, pos: Vec2, actor: NodeId | undefined, about: NodeId | undefined): NodeId | undefined {
+    const w = this.world;
+    const type = w.registry.types.get("Report");
+    if (type?.kind !== "knowledge") return undefined;
+    const attrs = instantiateAttrs(type, createRng(0), { event: name, day: Math.round(w.time * 1000) / 1000, x: Math.round(pos.x * 100) / 100, y: Math.round(pos.y * 100) / 100 });
+    const id = createNode(w, "molly", { kind: "knowledge", type: "Report", attrs });
+    if (about !== undefined && w.registry.edges.has("about")) createEdge(w, "molly", { type: "about", from: id, to: about });
+    if (actor !== undefined && w.registry.edges.has("actor")) createEdge(w, "molly", { type: "actor", from: id, to: actor });
+    return id;
   }
 
   // ---------------------------------------------------------------- recognising groups

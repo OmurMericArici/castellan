@@ -38,7 +38,7 @@ the world *is* and *does* lives in packs, starting with our own default set
 | **Archie** | the architect: loads, checks and updates packs (types and rules) |
 | **Noah** | genesis: defines the space, places the first leaves and knowledge; the user configures Noah |
 | **Molly** | the world: recognises and names what forms, defines concepts, influences people |
-| **Adam** | the people: wakes them, scores their goals, moves them, records what they learn; later gives them character |
+| **Adam** | the people: wakes them, plans how to reach their goals, moves them, records what they see, learn and are told; gives them traits |
 | **Entropy** | *([ADR-0021](decisions/0021-entropy.md))* growth and decay of space, things and knowledge |
 
 ## The long road
@@ -67,7 +67,11 @@ Keep these words fixed so code, docs and talks use the same language.
 | **Node** | One unit in the graph. Three kinds: entity, knowledge, mind. |
 | **Entity** | Something that exists in the world and has a place: person, tree, house, village. |
 | **Knowledge** | A shared, immutable claim or skill that people link to: a sighting, know-how, a name. |
-| **Mind** | A shared piece of how people think: a need, goal, action or trait. |
+| **Mind** | A shared piece of how people think: a need, emotion, goal, method (action) or trait. |
+| **Emotion** | A fast-changing state (fear, anger, dread) that scales goals, methods and restraint rather than being satisfied like a need. |
+| **Method** | An action a person knows how to do: known from birth, learned by watching or being taught, preferred more or less, forgotten. |
+| **Fact** | Something a person believes is true (`hasLoad`, `known.Tree`). Methods require and give facts; the planner chains them. |
+| **Restraint** | What holds a person back from a method (0..1); emotions and traits can wear it down. |
 | **Edge** | A typed link between nodes (`knows`, `has`, `livesIn`, `partOf`…), readable from both ends; each end may carry its own data. |
 | **Leaf** | A type that is never derived (person, tree, stone, tool). Only leaves can come from outside. |
 | **Derived** | A type that can only emerge through a process (house, village). |
@@ -75,7 +79,7 @@ Keep these words fixed so code, docs and talks use the same language.
 | **Concept** | A planned entity Molly places (a house site) that people turn real by working. |
 | **Event** | One change to the world. Every change is an event; the event log is the history. |
 | **Lazy value** | A value stored as (value, rate, since) and computed when read: hunger, age, wear. |
-| **Determination** | How strongly a person sticks with their current action against risk and better-looking options. |
+| **Determination** | A trait: how strongly a person sticks with their current action against risk and better-looking options. |
 | **Pack** | A data bundle of types, rules and parts, checked by Archie and run by our interpreter. |
 | **Actualizer** | Gives nodes a physical form; reads the world, never changes it. |
 | **Seed** | Makes a run reproducible. Same Noah config + seed + packs = same world. |

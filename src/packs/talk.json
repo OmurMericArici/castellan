@@ -1,0 +1,41 @@
+{
+  "pack": "talk",
+  "version": "0.1.0",
+  "description": "People get lonely and talk. Talking passes on what they know (places, events they heard of) and the methods they know, both ways (ADR-0032: learning through talk).",
+  "requires": ["core"],
+  "types": {
+    "Isolation": {
+      "kind": "mind",
+      "role": "need",
+      "description": "Being cut off from others. Grows slowly, drops while talking.",
+      "start": "rand_range(0.1, 0.3)",
+      "rate": "if(doing == \"Chat\", -2, 0.2)",
+      "urgentAt": 0.85
+    },
+    "Company": {
+      "kind": "mind",
+      "role": "goal",
+      "tier": 3,
+      "weight": "needs.Isolation",
+      "description": "Having company."
+    },
+    "Chat": {
+      "kind": "mind",
+      "role": "action",
+      "description": "Walk to the nearest person, talk a while, and trade what they know and how they do things.",
+      "steps": [
+        { "goto": { "person": "nearest", "within": 20 } },
+        { "work": 0.03 },
+        {
+          "effect": {
+            "needs.Isolation": -0.5,
+            "other.needs.Isolation": -0.4,
+            "tell": { "to": "target", "what": "any", "count": 3, "mutual": true },
+            "teach": { "to": "target", "method": "any", "mutual": true }
+          }
+        }
+      ],
+      "serves": { "Company": "if(needs.Isolation > 0.35, 1, 0)" }
+    }
+  }
+}

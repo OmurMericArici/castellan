@@ -25,8 +25,8 @@ and read their story. Defined in [ADR-0011](decisions/0011-first-slice.md).
 
 ## v0.1 out of scope (on purpose)
 
-- Birth, ageing to death, farming, personalities (beyond determination).
-- Sharing knowledge between people (telling), know-how, knowledge drift, lies.
+- Birth, ageing to death, farming.
+- Knowledge drift, lies.
 - Towns and above, trade, war.
 - Loading packs mid-run from the UI; an LLM pack workflow (the format must allow it, the UI can wait).
 - 3D, the learning stage.
@@ -43,9 +43,10 @@ Each milestone ends with something visible, a devlog entry and a screenshot or G
 | M3 | Adam | People wander, see, explore, remember sightings, pick actions by weighted goals with determination, fear the night. |
 | M4 | Shelter | Molly places house concepts; people gather wood and build; `livesIn` meets shelter; houses become a named village; regrowth and wear. |
 | M5 | Behaviour in packs | Actions are step programs, reactions fire on events, memory rules live on knowledge types, people notice each other (`meets`). Adam's hard-coded verbs are gone. `hunger`, `hostility` and memory rules work as packs written from PACKS.md alone (ADR-0026, 0027). |
+| M5b | The mind | People plan backward over facts (no method names another), emotions scale goals, methods and restraint, traits and emotions scale each other, methods are learned by watching and talk and preferred more or less, events and people are remembered, an ordinary person can kill when angry and afraid enough, determination is a trait (ADR-0032, 0033). |
 | M6 | Form and story | WFC house layouts, person story panel, timeline, Noah config in the URL, README with GIF. **v0.1 ships.** |
 
-Current milestone: **M6** (M0–M4 done 2026-11-14, M5 done 2026-11-15).
+Current milestone: **M6** (M0–M4 done 2026-11-14, M5 and M5b done 2026-11-15).
 
 ## Parking lot
 
@@ -53,17 +54,16 @@ New ideas go here, not into the current milestone. Each one gets a date and one 
 Moving an item into scope needs a decision record.
 
 - 2026-11-14 — Villages that merge, split or dissolve; houses that collapse when their condition hits zero; repair.
-- 2026-11-15 — Problem-solving mind with GOAP (ADR-0032): methods with preconditions/effects, learned and preferred; no depth limit; replaces flat action choice.
-- 2026-11-15 — Emotions as multipliers on goals, method preferences and restraint thresholds (ADR-0032); traits and emotions supporting or suppressing each other.
-- 2026-11-15 — Learning by observation (engine) and talk (pack); schools as a pack.
-- 2026-11-15 — Declared interactions between node types; packs adding new node kinds (ADR-0032).
+- ~~2026-11-15 — Problem-solving mind with GOAP; emotions as multipliers; traits and emotions scaling each other; learning by observation and talk.~~ Built in M5b (ADR-0033).
+- 2026-11-15 — Schools as a pack (talk exists; a school is a place and a teacher).
+- 2026-11-15 — Packs adding new node kinds (ADR-0032). Declared interactions are covered by methods for now.
 - 2026-11-15 — Mating and marriage as methods (desire → find a mate → a friend of the opposite sex → marry).
 - 2026-11-15 — Watching morality emerge in a crowded, long simulation (methods punished or rewarded by others' reactions).
-- 2026-11-15 — Witnessed events as shared knowledge claims that spread by telling (today: Molly's witness/hears only).
+- ~~2026-11-15 — Witnessed events as shared knowledge claims that spread by telling.~~ Built in M5b (Report claims).
 - 2026-11-15 — Justice: villagers acting together against a known killer (needs group actions).
 - 2026-11-14 — Lies pack: knowledge given wrong on purpose.
 - 2026-11-14 — Knowledge drift: claims degrading into variants over time or when retold (ties to Entropy).
-- 2026-11-14 — Adam assigns personalities (trait nodes) to people.
+- ~~2026-11-14 — Adam assigns personalities (trait nodes) to people.~~ Traits with distributions (ADR-0030); determination is one (M5b).
 - 2026-11-14 — Trade routes emerging from shared knowledge (merchants teaching others).
 - 2026-11-14 — Desire paths: routes people walk often wear into trails; Molly recognises and names them as roads.
 - 2026-11-14 — LLM workflow for writing packs (schema + examples + Archie's errors as feedback). First step: a blind test, a fresh LLM writing a pack from PACKS.md alone.

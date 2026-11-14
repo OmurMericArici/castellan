@@ -57,9 +57,10 @@ describe("shelter: from people to a village", () => {
       expect(typeof v.attrs["name"]).toBe("string");
       const members = g.edgesOf(v.id, "memberOf").map((e) => g.node(e.from)!);
       expect(members.length).toBeGreaterThanOrEqual(2);
+      // Each house is within the village radius of another member (villages grow house by house).
       for (const m of members) {
         expect(m.attrs["state"]).toBe("built");
-        expect(Math.hypot(m.pos!.x - v.pos!.x, m.pos!.y - v.pos!.y)).toBeLessThanOrEqual(12);
+        expect(members.some((o) => o !== m && Math.hypot(m.pos!.x - o.pos!.x, m.pos!.y - o.pos!.y) <= 12)).toBe(true);
       }
     }
     const names = villages.map((v) => v.attrs["name"]);
@@ -113,7 +114,7 @@ describe("build and recognise rules in packs", () => {
           kind: "entity",
           build: {
             meets: "Fatige",
-            material: "Person",
+            material: "Sighting",
             materialAttr: "wood",
             amount: 3,
             work: 1,
@@ -132,7 +133,7 @@ describe("build and recognise rules in packs", () => {
     const r2 = checkPacks([CORE, { ...bad, types: { ...bad.types, Hamlet: { kind: "entity", recognize: { members: "Hut", radius: 5, min: 2, full: 3, memberEdge: "partOf" } } } }]);
     const msgs2 = r2.ok ? "" : r2.errors.map(formatPackError).join("\n");
     expect(msgs2).toMatch(/build.meets: "Fatige" is not a need type \(did you mean "Fatigue"\?\)/);
-    expect(msgs2).toMatch(/build.material: "Person" must be a memorable entity type/);
+    expect(msgs2).toMatch(/build.material: "Sighting" must be a memorable entity type/);
     expect(msgs2).toMatch(/build.planner: edge "plans" is not defined/);
     expect(msgs2).toMatch(/recognize.memberEdge: edge "partOf" is not defined/);
   });

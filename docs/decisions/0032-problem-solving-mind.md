@@ -1,6 +1,6 @@
 # 0032 — A problem-solving mind: methods, emotions, new node types, morality
 
-- Status: accepted (direction and the open questions settled; timing open)
+- Status: accepted (direction settled; timing: before M6)
 - Date: 2026-11-15
 
 ## Context
@@ -70,8 +70,8 @@ The user described the next layer of the mind and asked for it to be noted.
    through learning, preference and others' reactions.
 
 ## Still open
-- When: before v0.1 (M6) or right after.
-- The exact shape of method preconditions/effects (which facts a person's belief state has).
+- ~~When: before v0.1 (M6) or right after.~~ Before M6 (2026-11-15).
+- ~~The exact shape of method preconditions/effects.~~ Named facts, local requires/gives, derived preconditions (2026-11-15; ADR-0033).
 
 ## Discussion
 - 2026-11-15 — User: note these to add: new node types and interactions between
@@ -90,3 +90,23 @@ The user described the next layer of the mind and asked for it to be noted.
   people who normally wouldn't mate can when very happy or very deprived. All fuzzy.
   No neural network, but built by hand and emergently. Traits can support or
   suppress each other (an angry person may not be very friendly at the same time).
+- 2026-11-15 — User: finish everything we addressed before moving on to M6. So ADR-0032
+  is built first (milestone M5b), together with the gaps found while reviewing how people
+  are modelled: determination becomes a trait like Psychopathy, people remember witnessed
+  events and other people, emotions get their own layer.
+- 2026-11-15 — User: emotions move out of needs into their own role (Fear, Anger, Dread
+  become emotions); one `scales` mechanism lets emotions, traits and needs multiply goal
+  weights, method scores, restraint and each other. All four extras are built before M6:
+  a talk pack, events remembered as knowledge, ordinary people able to kill when afraid
+  and angry enough, people remembering each other.
+- 2026-11-15 — User, on GOAP: no predefined decision tree. People should hold a
+  requirement/desire in their head that propagates step by step: the house needs wood,
+  wood needs a tree. That order must come out emergently. Unsure whether giving it
+  up front would be more useful.
+- 2026-11-15 — Settled the open question: each method states only its own local
+  preconditions (`requires`) and results (`gives`) over named facts about what the person
+  believes; no method names another. The engine plans backward at every decision, so a
+  missing fact becomes a sub-desire with the same urgency, and "house → wood → tree"
+  emerges. Preconditions are derived from steps where possible (`goto known Tree` means
+  "must know a tree"); `gives` is written by hand. Rejected HTN-style fixed decompositions
+  (a predefined tree). User's reasoning: the order must come out emergently, not be handed to people.

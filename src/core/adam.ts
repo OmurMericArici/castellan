@@ -5,7 +5,7 @@ import type { Attrs, EdgeId, GraphNode, NodeId, Vec2 } from "./graph";
 import { isLazy, lazy, readLazy, timeToReach, withRate, withValue } from "./lazy";
 import type { LazyValue } from "./lazy";
 import type { Effect, NumberSource, ReactionEvent, Ref, Step, Target, TypeDef } from "./packs";
-import { REACTION_EVENTS } from "./packs";
+import { impliedGives, impliedRequires, REACTION_EVENTS } from "./packs";
 import { findPath, passable, pathLength, pointAlong } from "./path";
 import { homeOf, num, planOf } from "./projects";
 import type { Ticket } from "./queue";
@@ -46,6 +46,11 @@ const MEET_COOLDOWN = 0.5;
 /** A knowledge link without a memory rule is refreshed when seen again after this many days. */
 const REFRESH_AFTER = 5;
 
+/** Preference for a method stays in this range; at 0 the method is forgotten (ADR-0032). */
+const MAX_PREFERENCE = 3;
+/** A longer chain of sub-problems makes a goal a little less attractive. */
+const CHAIN_DISCOUNT = 0.97;
+
 /** A running action: which step, and what it is aimed at. Engine-side; re-deciding rebuilds it. */
 interface Program {
   readonly action: string;
@@ -54,6 +59,26 @@ interface Program {
   target?: NodeId;
   /** How many times the person has re-followed a moving target in this step. */
   chase?: number;
+  /** The method this step is for (the end of the plan), and the plan itself (ADR-0033). */
+  top?: string;
+  chain?: readonly string[];
+}
+
+/** A plan: methods to do in order, ending with the one that serves the goal. */
+interface Plan {
+  readonly chain: readonly string[];
+  readonly cost: number;
+  /** Product of (1 − restraint) over the chain. */
+  readonly factor: number;
+}
+
+/** A person's mind after traits, needs and emotions have scaled each other (ADR-0033). */
+export interface MindState {
+  traits: Record<string, number>;
+  needs: Record<string, number>;
+  emotions: Record<string, number>;
+  /** Multipliers by `scales` key: "goal.Vent", "action.Attack", "restraint", "restraint.Attack". */
+  mult: Map<string, number>;
 }
 
 interface Runtime {
@@ -73,6 +98,8 @@ interface Runtime {
 export interface Choice {
   action: string;
   score: number;
+  /** The sub-problems on the way, first step first (only when there are any). */
+  via?: string[];
 }
 
 export interface AdamHooks {
@@ -87,7 +114,19 @@ export interface ReactionContext {
   it?: NodeId;
   other?: NodeId;
   action?: string;
+  /** Why an action failed. */
+  reason?: string;
+  /** The method just learned. */
+  method?: string;
   event?: { name: string; known: boolean };
+}
+
+/** An event a person knows of: a shared Report claim (ADR-0033). */
+export interface KnownReport {
+  claim: NodeId;
+  event: string;
+  actor?: NodeId;
+  about?: NodeId;
 }
 
 /** What a person knows of one thing: the claim, where it says the thing is, and what they remember of it. */
@@ -152,8 +191,9 @@ export class Adam {
     for (const p of this.people()) {
       const rt = this.runtime(p.id);
       const rng = createRng(w.seed).fork(hash2(p.id, 0x61646d31));
-      for (const t of this.types) {
-        if (t.role !== "need" && t.role !== "goal" && t.role !== "trait") continue;
+      // Traits first: needs, emotions and know-how may read them.
+      const ordered = [...this.types.filter((t) => t.role === "trait"), ...this.types.filter((t) => t.role === "need" || t.role === "emotion" || t.role === "goal")];
+      for (const t of ordered) {
         const mind = this.mindNodes.get(t.name)!;
         if (w.graph.edgesOf(p.id, "has").some((e) => e.to === mind)) continue;
         const fromData: Attrs = {};
@@ -162,6 +202,17 @@ export class Adam {
         if (t.role === "trait") fromData["value"] = this.drawTrait(t, p, rng);
         const id = createEdge(w, "adam", { type: "has", from: p.id, to: mind, fromData });
         if (t.need) rt.needEdges.set(t.name, id);
+      }
+      // Know-how (ADR-0032): which methods this person knows from birth.
+      if (w.registry.edges.has("knowsHow") && !w.graph.edgesOf(p.id, "knowsHow").some((e) => e.from === p.id)) {
+        const scope: Scope = { self: selfScope(p), traits: this.traits(p.id) };
+        for (const t of this.types) {
+          if (!t.action) continue;
+          const chance = this.num(t.action.knowhow.innate, scope, rng);
+          if (chance >= 1 || rng.next() < chance) {
+            createEdge(w, "adam", { type: "knowsHow", from: p.id, to: this.mindNodes.get(t.name)!, fromData: { preference: 1, learnedAt: w.time, how: "born" } });
+          }
+        }
       }
       schedule(w, w.time + rng.next() * 0.01, { handler: "adam.wake", data: { person: p.id, reason: "start" } });
     }
@@ -181,7 +232,7 @@ export class Adam {
     return last[1];
   }
 
-  /** A person's trait values. */
+  /** A person's trait values as drawn (before anything scales them). */
   traits(id: NodeId): Record<string, number> {
     const g = this.world.graph;
     const out: Record<string, number> = {};
@@ -190,6 +241,113 @@ export class Adam {
       if (mind && this.world.registry.types.get(mind.type)?.role === "trait") out[mind.type] = num(e.fromData["value"]);
     }
     return out;
+  }
+
+  private mindCache = new Map<NodeId, { at: number; state: MindState }>();
+
+  /**
+   * Traits, needs and emotions after they scale each other (ADR-0033): every
+   * multiplier is computed from the raw values, in one pass, so there are no loops.
+   */
+  mind(id: NodeId): MindState {
+    const at = this.world.log.length + this.world.time;
+    const hit = this.mindCache.get(id);
+    if (hit && hit.at === at) return hit.state;
+    const reg = this.world.registry;
+    const rawTraits = this.traits(id);
+    const levels = this.levels(id);
+    const raw: Record<string, number> = { ...rawTraits, ...levels };
+    const mult = new Map<string, number>();
+    for (const t of this.types) {
+      if (!t.scales || raw[t.name] === undefined) continue;
+      for (const [key, src] of t.scales) {
+        const m = Math.max(0, this.safeNum(src, { value: raw[t.name]! }, `${t.name}.scales.${key}`));
+        mult.set(key, (mult.get(key) ?? 1) * m);
+      }
+    }
+    const scaled = (role: string, values: Record<string, number>) => {
+      const out: Record<string, number> = {};
+      for (const [k, v] of Object.entries(values)) out[k] = clamp01(v * (mult.get(`${role}.${k}`) ?? 1));
+      return out;
+    };
+    const needs: Record<string, number> = {};
+    const emotions: Record<string, number> = {};
+    for (const [k, v] of Object.entries(levels)) (reg.types.get(k)?.role === "emotion" ? emotions : needs)[k] = v;
+    const state: MindState = { traits: scaled("trait", rawTraits), needs: scaled("need", needs), emotions: scaled("emotion", emotions), mult };
+    this.mindCache.set(id, { at, state });
+    return state;
+  }
+
+  private howCache = new Map<NodeId, { at: number; known: Map<string, { edge: EdgeId; preference: number }> }>();
+
+  /** The person's `knowsHow` edges by method, cached until the world changes. */
+  private knowHow(id: NodeId): Map<string, { edge: EdgeId; preference: number }> {
+    const at = this.world.log.length;
+    const hit = this.howCache.get(id);
+    if (hit && hit.at === at) return hit.known;
+    const g = this.world.graph;
+    const known = new Map<string, { edge: EdgeId; preference: number }>();
+    for (const e of g.edgesOf(id, "knowsHow")) {
+      if (e.from !== id) continue;
+      const type = g.node(e.to)?.type;
+      const p = e.fromData["preference"];
+      if (type) known.set(type, { edge: e.id, preference: typeof p === "number" ? p : 1 });
+    }
+    this.howCache.set(id, { at, known });
+    return known;
+  }
+
+  /** The `knowsHow` edge to a method, if the person knows it. */
+  private knowHowEdge(id: NodeId, method: string): EdgeId | undefined {
+    return this.knowHow(id).get(method)?.edge;
+  }
+
+  /** Without the `knowsHow` edge type (older packs), everyone knows every method. */
+  knowsMethod(id: NodeId, method: string): boolean {
+    if (!this.world.registry.edges.has("knowsHow")) return true;
+    return this.knowHow(id).has(method);
+  }
+
+  /** How much a person prefers a method they know (1 by default). */
+  preference(id: NodeId, method: string): number {
+    return this.knowHow(id).get(method)?.preference ?? 1;
+  }
+
+  /** Methods a person knows, with their preference. */
+  methods(id: NodeId): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const t of this.types) if (t.action && this.knowsMethod(id, t.name)) out[t.name] = this.preference(id, t.name);
+    return out;
+  }
+
+  /** Teach a person a method (by watching, being taught or Noah). Returns false if they knew it. */
+  learn(id: NodeId, method: string, how: string, from?: NodeId): boolean {
+    const w = this.world;
+    const mind = this.mindNodes.get(method);
+    if (mind === undefined || !w.registry.edges.has("knowsHow") || this.knowsMethod(id, method)) return false;
+    const node = w.graph.node(id);
+    if (!node || node.attrs["dead"] === true) return false;
+    createEdge(w, "adam", { type: "knowsHow", from: id, to: mind, fromData: { preference: 1, learnedAt: w.time, how, ...(from !== undefined ? { from } : {}) } });
+    this.react("learned", id, { method, ...(from !== undefined ? { other: from } : {}) });
+    return true;
+  }
+
+  /** Change a preference; at 0 the method is forgotten. */
+  private prefer(id: NodeId, method: string, delta: number): void {
+    const e = this.knowHowEdge(id, method);
+    if (typeof e !== "number") return;
+    const w = this.world;
+    const next = Math.min(MAX_PREFERENCE, this.preference(id, method) + delta);
+    if (next <= 0) emit(w, "adam", { kind: "edge.removed", id: e });
+    else emit(w, "adam", { kind: "edge.data", id: e, end: "from", data: { preference: Math.round(next * 1000) / 1000 } });
+  }
+
+  /** A person sees someone doing something: they may pick up the method (ADR-0032, learning by watching). */
+  observe(watcher: NodeId, actor: NodeId, action = this.world.activities.get(actor)?.action): void {
+    if (!action) return;
+    const t = this.world.registry.types.get(action);
+    if (!t?.action || t.action.knowhow.watch <= 0 || this.knowsMethod(watcher, action)) return;
+    if (this.rngFor(watcher, `watch:${actor}:${action}`).next() < t.action.knowhow.watch) this.learn(watcher, action, "watched", actor);
   }
 
   /** Molly's signals (dusk, dawn) reach everyone at once; packs may react to them. */
@@ -215,12 +373,27 @@ export class Adam {
     return pointAlong(leg.path, ((t - leg.depart) / (leg.arrive - leg.depart)) * len);
   }
 
-  needLevels(id: NodeId, t = this.world.time): Record<string, number> {
+  /** Raw levels of needs and emotions. */
+  private levels(id: NodeId, t = this.world.time): Record<string, number> {
     const out: Record<string, number> = {};
     for (const [name, eid] of this.runtime(id).needEdges) {
       const level = this.world.graph.edge(eid)?.fromData["level"];
       if (isLazy(level)) out[name] = readLazy(level, t);
     }
+    return out;
+  }
+
+  needLevels(id: NodeId, t = this.world.time): Record<string, number> {
+    return this.byRole(this.levels(id, t), "need");
+  }
+
+  emotionLevels(id: NodeId, t = this.world.time): Record<string, number> {
+    return this.byRole(this.levels(id, t), "emotion");
+  }
+
+  private byRole(levels: Record<string, number>, role: "need" | "emotion"): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const [k, v] of Object.entries(levels)) if (this.world.registry.types.get(k)?.role === role) out[k] = v;
     return out;
   }
 
@@ -246,7 +419,7 @@ export class Adam {
     for (const k of g.edgesOf(person, "knows")) {
       if (k.from !== person) continue;
       const claim = g.node(k.to);
-      if (!claim) continue;
+      if (!claim || claim.type !== "Sighting") continue;
       for (const a of g.edgesOf(claim.id, "about")) {
         const s = g.node(a.to);
         if (!s) continue;
@@ -258,6 +431,58 @@ export class Adam {
 
   knownCount(id: NodeId): number {
     return this.knowledge(id).length;
+  }
+
+  /** Events the person knows of (Report claims), and who they say did what. */
+  reports(person: NodeId): KnownReport[] {
+    const g = this.world.graph;
+    const out: KnownReport[] = [];
+    for (const k of g.edgesOf(person, "knows")) {
+      if (k.from !== person) continue;
+      const claim = g.node(k.to);
+      if (!claim || claim.type !== "Report") continue;
+      const actor = g.edgesOf(claim.id, "actor").find((e) => e.from === claim.id)?.to;
+      const about = g.edgesOf(claim.id, "about").find((e) => e.from === claim.id)?.to;
+      out.push({ claim: claim.id, event: String(claim.attrs["event"] ?? ""), ...(actor !== undefined ? { actor } : {}), ...(about !== undefined ? { about } : {}) });
+    }
+    return out;
+  }
+
+  /** `did.<Event>`: whether the person knows the other did that. */
+  private didScope(id: NodeId, other: NodeId | undefined): Scope {
+    const out: Scope = {};
+    for (const name of this.world.registry.events.keys()) out[name] = false;
+    if (other !== undefined) for (const r of this.reports(id)) if (r.actor === other) out[r.event] = true;
+    return out;
+  }
+
+  /**
+   * Link a person to a claim (seeing, being told, an event noticed): one link per
+   * claim, confidence from the claim type's memory rule, forgotten when it fades.
+   */
+  linkClaim(person: NodeId, claim: NodeId, opts: { confidence?: number; from?: NodeId } = {}): EdgeId | undefined {
+    const w = this.world;
+    const g = w.graph;
+    const node = g.node(claim);
+    if (!node || g.node(person)?.attrs["dead"] === true) return undefined;
+    const memory = w.registry.types.get(node.type)?.memory;
+    const self = selfScope(g.node(person)!);
+    const fade = memory ? this.num(memory.fade, { self }) : 0;
+    const confidence = lazy(clamp01(opts.confidence ?? 1), fade, w.time, 0, 1);
+    const same = g.edgesOf(person, "knows").find((k) => k.from === person && k.to === claim);
+    const data: Attrs = { learnedAt: w.time, confidence, ...(opts.from !== undefined ? { from: opts.from } : {}) };
+    let edgeId: EdgeId;
+    if (same) {
+      edgeId = same.id;
+      emit(w, "adam", { kind: "edge.data", id: same.id, end: "from", data });
+    } else {
+      edgeId = createEdge(w, "adam", { type: "knows", from: person, to: claim, fromData: data });
+    }
+    if (memory && fade < 0) {
+      const t = timeToReach(confidence, memory.forgetBelow, w.time);
+      if (t !== undefined) schedule(w, t, { handler: "adam.forget", data: { edge: edgeId, since: w.time } });
+    }
+    return edgeId;
   }
 
   /** What a person's mind expressions see right now (also used by Molly). */
@@ -279,10 +504,16 @@ export class Adam {
       if (type && typeof knows[type] === "number") knows[type] = (knows[type] as number) + 1;
     }
     const plan = planOf(this.world, person.id);
+    const mind = this.mind(person.id);
+    const reports: Scope = {};
+    for (const name of this.world.registry.events.keys()) reports[name] = 0;
+    for (const r of this.reports(person.id)) if (typeof reports[r.event] === "number") reports[r.event] = (reports[r.event] as number) + 1;
     return {
-      needs: this.needLevels(person.id),
+      needs: mind.needs,
+      emotions: mind.emotions,
       night: isNight(this.world.time),
       knows,
+      reports,
       self: selfScope(person),
       doing,
       plan: {
@@ -292,7 +523,7 @@ export class Adam {
         workLeft: plan ? Math.max(0, plan.rule.work - num(plan.node.attrs["worked"])) : 0,
       },
       home: homeOf(this.world, person.id) !== undefined,
-      traits: this.traits(person.id),
+      traits: mind.traits,
       links: this.linkCounts(person.id),
       field: this.fieldsAt(this.positionOf(person.id) ?? person.pos),
     };
@@ -355,14 +586,16 @@ export class Adam {
     const now = w.time;
     const act = w.activities.get(id);
     const current = rt.program?.action ?? "";
+    const currentTop = rt.program?.top ?? current;
     const ongoing = rt.program !== undefined && !finished;
     const commitment = !ongoing ? 0 : act?.leg ? 0.5 + 0.5 * clamp01((now - act.leg.depart) / (act.leg.arrive - act.leg.depart)) : 0.5;
-    const determination = typeof person.attrs["determination"] === "number" ? person.attrs["determination"] : 0.5;
+    const determination = this.determination(id);
 
     const scope = this.scopeFor(person, act?.action ?? "");
+    const mind = this.mind(id);
     const goals = this.types
       .filter((t) => t.goal)
-      .map((t) => ({ name: t.name, tier: t.goal!.tier, weight: clamp01(this.safeNum(t.goal!.weight, scope, `${t.name}.weight`)) }));
+      .map((t) => ({ name: t.name, tier: t.goal!.tier, weight: clamp01(this.safeNum(t.goal!.weight, scope, `${t.name}.weight`) * (mind.mult.get(`goal.${t.name}`) ?? 1)) }));
     const bar = URGENT + determination * commitment * DETERMINATION_SHIELD;
     let urgent = goals.filter((g) => g.tier === 1 && g.weight > bar).map((g) => g.name);
     const helps = (t: TypeDef) =>
@@ -370,38 +603,147 @@ export class Adam {
         const src = t.action?.serves.get(u);
         return src !== undefined && this.safeNum(src, scope, `${t.name}.serves.${u}`) > 0;
       });
-    // If nothing the person can do helps the urgent goal, urgency can't narrow the choice.
-    if (urgent.length && !this.types.some((t) => t.action && helps(t))) urgent = [];
 
-    const scores: Choice[] = [];
+    // Every method that serves a goal is a candidate; it needs a plan to get there (ADR-0033).
+    const planner = this.planner(person, rt);
+    const options: { t: TypeDef; plan: Plan; score: number }[] = [];
     for (const t of this.types) {
-      if (!t.action) continue;
-      // An action that can't even start (nowhere to go first) is not a choice (ADR-0029 #1).
-      const first = t.action.steps[0];
-      if (first?.kind === "goto" && !first.optional && !(t.name === current && ongoing)) {
-        if (this.firstDestinations(person, first.targets, { action: t.name, steps: t.action.steps, index: 0 }, rt).length === 0) continue;
-      }
+      if (!t.action || t.action.serves.size === 0 || !this.knowsMethod(id, t.name)) continue;
+      const keep = t.name === currentTop && ongoing && rt.program?.chain ? { chain: rt.program.chain, cost: 0, factor: 1 } : undefined;
+      const plan = planner(t.name) ?? keep;
+      if (!plan) continue;
       let score = 0;
       for (const g of goals) {
         const src = t.action.serves.get(g.name);
         if (src) score += g.weight * this.safeNum(src, scope, `${t.name}.serves.${g.name}`);
       }
-      if (urgent.length && !helps(t)) continue;
-      if (t.name === current && ongoing) score += determination * commitment * COMMIT_BONUS;
-      scores.push({ action: t.name, score });
+      score *= (mind.mult.get(`action.${t.name}`) ?? 1) * this.preference(id, t.name) * plan.factor * Math.pow(CHAIN_DISCOUNT, plan.chain.length - 1);
+      if (t.name === currentTop && ongoing) score += determination * commitment * COMMIT_BONUS;
+      options.push({ t, plan, score });
     }
-    scores.sort((a, b) => b.score - a.score);
+    // If nothing the person can do helps the urgent goal, urgency can't narrow the choice.
+    if (urgent.length && !options.some((o) => helps(o.t))) urgent = [];
+    const scores: Choice[] = options
+      .filter((o) => !urgent.length || helps(o.t))
+      .map((o) => ({ action: o.t.name, score: o.score, ...(o.plan.chain.length > 1 ? { via: o.plan.chain.slice(0, -1) } : {}) }))
+      .sort((a, b) => b.score - a.score);
     this.lastChoice.set(id, { reason, scores });
-    const chosen = scores[0]?.action;
+    const best = scores[0];
+    const chosen = best ? (best.via?.[0] ?? best.action) : undefined;
 
-    if (chosen && !(chosen === current && ongoing)) {
+    if (best && chosen && !(chosen === current && ongoing)) {
       this.interrupt(id, rt);
-      this.begin(person, chosen, rt);
+      this.begin(person, chosen, rt, best.action, [...(best.via ?? []), best.action]);
+    } else if (best && rt.program) {
+      rt.program.top = best.action;
+      rt.program.chain = [...(best.via ?? []), best.action];
     }
     if (w.graph.node(id)) {
       this.updateRates(person, rt);
       this.scheduleWake(person, rt, determination);
     }
+  }
+
+  /** Determination is a trait like any other (ADR-0033); 0.5 if no pack defines it. */
+  private determination(id: NodeId): number {
+    return this.mind(id).traits["Determination"] ?? 0.5;
+  }
+
+  /** How much holds the person back from a method right now, after emotions and traits scale it. */
+  private restraint(person: GraphNode, t: TypeDef): number {
+    const src = t.action?.restraint;
+    if (!src) return 0;
+    const mult = this.mind(person.id).mult;
+    const base = this.safeNum(src, this.scopeFor(person), `${t.name}.restraint`);
+    return clamp01(base * (mult.get("restraint") ?? 1) * (mult.get(`restraint.${t.name}`) ?? 1));
+  }
+
+  /**
+   * Backward planning (ADR-0033). A method whose facts all hold can be done now.
+   * Otherwise each missing fact becomes a sub-problem: some method the person knows
+   * that gives it, planned the same way. No method names another; the chain emerges.
+   * No depth limit: a fact already being solved higher up can't be used again, so
+   * the search always ends.
+   */
+  private planner(person: GraphNode, rt: Runtime): (method: string) => Plan | undefined {
+    const id = person.id;
+    const memo = new Map<string, Plan | null>();
+    const factMemo = new Map<string, boolean>();
+    const providers = new Map<string, string[]>();
+    for (const t of this.types) {
+      if (!t.action || !this.knowsMethod(id, t.name)) continue;
+      for (const f of [...t.action.gives, ...impliedGives(t.action.steps)]) providers.set(f, [...(providers.get(f) ?? []), t.name]);
+    }
+    const providersOf = (fact: string) => [...(providers.get(fact) ?? []), ...(fact.startsWith("known.") ? (providers.get("known.*") ?? []) : [])];
+    const holds = (fact: string, target?: Target): boolean => {
+      const key = target ? `${fact}|${target.kind === "known" || target.kind === "person" ? (target.where?.source ?? "") : ""}` : fact;
+      let v = factMemo.get(key);
+      if (v === undefined) {
+        v = this.factHolds(person, fact, rt, target);
+        factMemo.set(key, v);
+      }
+      return v;
+    };
+    const plan = (method: string, solving: ReadonlySet<string>): Plan | undefined => {
+      const key = `${method}|${[...solving].sort().join(",")}`;
+      const hit = memo.get(key);
+      if (hit !== undefined) return hit ?? undefined;
+      memo.set(key, null);
+      const t = this.world.registry.types.get(method);
+      const result = t?.action ? solve(t, solving) : undefined;
+      memo.set(key, result ?? null);
+      return result;
+    };
+    const solve = (t: TypeDef, solving: ReadonlySet<string>): Plan | undefined => {
+      const action = t.action!;
+      const r = this.restraint(person, t);
+      if (r >= 1) return undefined;
+      // A first step with alternatives and nowhere to go can't start (ADR-0029 #1).
+      const first = action.steps[0];
+      if (first?.kind === "goto" && !first.optional && first.targets.length > 1) {
+        if (this.firstDestinations(person, first.targets, { action: t.name, steps: action.steps, index: 0 }, rt).length === 0) return undefined;
+      }
+      const own = action.cost / Math.max(0.05, this.preference(id, t.name));
+      const missing = [...impliedRequires(action.steps).map((x) => ({ fact: x.fact, target: x.target as Target | undefined })), ...action.requires.map((fact) => ({ fact, target: undefined }))].filter(
+        (x) => !holds(x.fact, x.target),
+      );
+      if (missing.length === 0) return { chain: [t.name], cost: own, factor: 1 - r };
+      let cost = own;
+      let factor = 1 - r;
+      let firstChain: readonly string[] | undefined;
+      for (const m of missing) {
+        if (solving.has(m.fact)) return undefined;
+        const next = new Set(solving).add(m.fact);
+        let best: Plan | undefined;
+        for (const p of providersOf(m.fact)) {
+          if (p === t.name) continue;
+          const sub = plan(p, next);
+          if (sub && (!best || sub.cost < best.cost)) best = sub;
+        }
+        if (!best) return undefined;
+        cost += best.cost;
+        factor *= best.factor;
+        firstChain ??= best.chain;
+      }
+      return { chain: [...firstChain!, t.name], cost, factor };
+    };
+    return (method) => plan(method, new Set());
+  }
+
+  /** Whether a fact holds for the person, by what they believe (ADR-0033). */
+  private factHolds(person: GraphNode, fact: string, rt: Runtime, target?: Target): boolean {
+    const w = this.world;
+    const declared = w.registry.facts.get(fact);
+    if (declared) return this.test(declared.expr, this.scopeFor(person), `facts.${fact}`);
+    const probe = { action: "", steps: [], index: 0 };
+    if (target) return this.destinations(person, target, probe, rt).length > 0;
+    const [root, name = ""] = fact.split(".");
+    if (root === "known") return this.knowledge(person.id, name).length > 0;
+    if (root === "linked") return this.destinations(person, { kind: "linked", edge: name }, probe, rt).length > 0;
+    if (root === "home") return homeOf(w, person.id) !== undefined;
+    if (root === "plan") return planOf(w, person.id) !== undefined;
+    if (root === "person") return this.destinations(person, { kind: "person", within: 15 }, probe, rt).length > 0;
+    return false;
   }
 
   private interrupt(id: NodeId, rt: Runtime): void {
@@ -421,7 +763,7 @@ export class Adam {
     }
   }
 
-  private begin(person: GraphNode, action: string, rt: Runtime): void {
+  private begin(person: GraphNode, action: string, rt: Runtime, top = action, chain: readonly string[] = [action]): void {
     const steps = this.world.registry.types.get(action)?.action?.steps;
     if (!steps) return;
     if (rt.instant.t === this.world.time && rt.instant.n >= 3) {
@@ -432,7 +774,7 @@ export class Adam {
       rt.pauseUntil = w.time + 0.05;
       return;
     }
-    rt.program = { action, steps, index: 0 };
+    rt.program = { action, steps, index: 0, top, chain };
     this.run(person.id, rt);
   }
 
@@ -534,14 +876,21 @@ export class Adam {
     const now = this.world.time;
     rt.instant = rt.instant.t === now ? { t: now, n: rt.instant.n + 1 } : { t: now, n: 1 };
     if (reason === "finished") this.react("finished", id, { action });
+    else if (action) this.react("failed", id, { action, reason });
     this.decide(id, reason, true);
+  }
+
+  /** What an activity is on the way to, if it is a sub-problem (for the history and the story). */
+  private purpose(rt: Runtime, action: string): { for?: string } {
+    const top = rt.program?.top;
+    return top && top !== action ? { for: top } : {};
   }
 
   private stay(id: NodeId, action: string, rt: Runtime): void {
     const w = this.world;
     const act = w.activities.get(id);
     if (!(act && act.action === action && !act.leg)) {
-      emit(w, "adam", { kind: "activity", person: id, activity: { action, startedAt: w.time } });
+      emit(w, "adam", { kind: "activity", person: id, activity: { action, startedAt: w.time, ...this.purpose(rt, action) } });
     }
     if (!rt.program) rt.program = { action, steps: [{ kind: "stay" }], index: 0 };
   }
@@ -549,7 +898,7 @@ export class Adam {
   private work(id: NodeId, action: string, duration: number, rt: Runtime): void {
     const w = this.world;
     const startedAt = w.time;
-    emit(w, "adam", { kind: "activity", person: id, activity: { action, startedAt } });
+    emit(w, "adam", { kind: "activity", person: id, activity: { action, startedAt, ...this.purpose(rt, action) } });
     rt.step.push(schedule(w, startedAt + duration, { handler: "adam.done", data: { person: id, startedAt } }));
   }
 
@@ -562,7 +911,7 @@ export class Adam {
       const depart = w.time;
       const arrive = depart + pathLength(path) / this.opts.speed;
       const leg = { path: path.map(round2), depart, arrive };
-      emit(w, "adam", { kind: "activity", person: person.id, activity: { action, startedAt: depart, leg } });
+      emit(w, "adam", { kind: "activity", person: person.id, activity: { action, startedAt: depart, leg, ...this.purpose(rt, action) } });
       rt.heading = Math.atan2(d.pos.y - from.y, d.pos.x - from.x);
       if (rt.program && d.node !== undefined) rt.program.target = d.node;
       rt.step.push(schedule(w, arrive, { handler: "adam.arrive", data: { person: person.id, depart } }));
@@ -653,7 +1002,7 @@ export class Adam {
           .filter((o) => o.id !== person.id)
           .map((o) => ({ node: o.id, pos: this.positionOf(o.id)!, o }))
           .filter((d) => d.pos && dist(from, d.pos) <= target.within)
-          .filter((d) => !target.where || this.test(target.where, { ...base, it: { ...attrScope(d.o.attrs), id: d.o.id }, rel: this.relWith(person.id, d.o.id), bond: this.bondWith(person.id, d.o.id) }, "goto.person.where"))
+          .filter((d) => !target.where || this.test(target.where, { ...base, it: { ...attrScope(d.o.attrs), id: d.o.id }, rel: this.relWith(person.id, d.o.id), bond: this.bondWith(person.id, d.o.id), did: this.didScope(person.id, d.o.id) }, "goto.person.where"))
           .sort((a, b) => dist(from, a.pos) - dist(from, b.pos))
           .map((d) => ({ node: d.node, pos: d.pos }));
       }
@@ -767,13 +1116,65 @@ export class Adam {
       } else if (e.kind === "kill") {
         const victim = resolve(e.who);
         if (victim !== undefined) this.kill(victim, id);
+      } else if (e.kind === "prefer") {
+        const on = who(e.on);
+        const method = e.method === "action" ? String(scope["action"] ?? "") : e.method;
+        // `preference` in the expression is their current preference for that method.
+        if (on !== undefined && method) this.prefer(on, method, this.num(e.add, { ...scope, preference: this.preference(on, method) }, rng));
+      } else if (e.kind === "teach") {
+        const to = resolve(e.to);
+        if (to === undefined || to === id) continue;
+        for (const [a, b] of e.mutual ? [[id, to], [to, id]] : [[id, to]]) this.teach(a!, b!, e.method, rng);
+      } else if (e.kind === "tell") {
+        const to = resolve(e.to);
+        if (to === undefined || to === id) continue;
+        for (const [a, b] of e.mutual ? [[id, to], [to, id]] : [[id, to]]) this.tell(a!, b!, e.what, e.count);
       } else if (e.kind === "event") {
         this.hooks.onEvent?.(e.name, id, e.about ? resolve(e.about) : undefined);
       }
     }
     for (const t of touched) {
       const p = g.node(t);
-      if (p) this.scheduleWake(p, this.runtime(t), typeof p.attrs["determination"] === "number" ? p.attrs["determination"] : 0.5);
+      if (p) this.scheduleWake(p, this.runtime(t), this.determination(t));
+    }
+  }
+
+  /** Pass on a method `from` knows and `to` doesn't. */
+  private teach(from: NodeId, to: NodeId, method: string, rng?: Rng): void {
+    const candidates = method === "any" ? this.types.filter((t) => t.action && this.knowsMethod(from, t.name) && !this.knowsMethod(to, t.name)).map((t) => t.name) : [method];
+    const pickFrom = candidates.filter((m) => this.knowsMethod(from, m) && !this.knowsMethod(to, m));
+    if (!pickFrom.length) return;
+    const r = rng ?? this.rngFor(from, `teach:${to}`);
+    this.learn(to, pickFrom[Math.floor(r.next() * pickFrom.length)]!, "taught", from);
+  }
+
+  /**
+   * Telling (ADR-0015): `to` gets links to claims `from` holds and they don't, newest
+   * first. A told event reaches them as hearing of it.
+   */
+  private tell(from: NodeId, to: NodeId, what: string, count: number): void {
+    const g = this.world.graph;
+    const theirs = new Set(g.edgesOf(to, "knows").filter((k) => k.from === to).map((k) => k.to));
+    const mine = g
+      .edgesOf(from, "knows")
+      .filter((k) => k.from === from && !theirs.has(k.to))
+      .map((k) => ({ claim: g.node(k.to), at: num(k.fromData["learnedAt"]) }))
+      .filter((c): c is { claim: GraphNode; at: number } => c.claim !== undefined)
+      .filter(({ claim }) => {
+        if (what === "any") return true;
+        if (claim.type === "Report") return claim.attrs["event"] === what;
+        const subject = g.edgesOf(claim.id, "about").find((e) => e.from === claim.id);
+        return subject !== undefined && g.node(subject.to)?.type === what;
+      })
+      .sort((a, b) => b.at - a.at)
+      .slice(0, count);
+    for (const { claim } of mine) {
+      this.linkClaim(to, claim.id, { confidence: 0.8, from });
+      if (claim.type === "Report") {
+        const actor = g.edgesOf(claim.id, "actor").find((e) => e.from === claim.id)?.to;
+        const about = g.edgesOf(claim.id, "about").find((e) => e.from === claim.id)?.to;
+        this.react("hears", to, { ...(about !== undefined ? { it: about } : {}), ...(actor !== undefined ? { other: actor } : {}), event: { name: String(claim.attrs["event"]), known: actor !== undefined } });
+      }
     }
   }
 
@@ -809,7 +1210,10 @@ export class Adam {
         other: other ? { ...attrScope(other.attrs), id: other.id } : {},
         rel: this.relWith(id, other?.id),
         bond: this.bondWith(id, other?.id),
+        did: this.didScope(id, other?.id),
         action: ctx.action ?? "",
+        reason: ctx.reason ?? "",
+        method: ctx.method ?? "",
         event: ctx.event ? { name: ctx.event.name, known: ctx.event.known } : { name: "", known: false },
       };
       const label = `${r.pack} reactions[${r.index}] (${r.on})`;
@@ -929,7 +1333,8 @@ export class Adam {
     if (!this.index || this.indexedNodes !== g.nodeCount) {
       const memorable = new Set(this.types.filter((t) => t.memorable).map((t) => t.name));
       this.index = new SpatialIndex(8);
-      for (const n of g.nodes({ kind: "entity" })) if (n.pos && memorable.has(n.type)) this.index.insert(n.id, n.pos);
+      // People move: others remember them when they meet, not from a fixed place.
+      for (const n of g.nodes({ kind: "entity" })) if (n.pos && memorable.has(n.type) && n.type !== "Person") this.index.insert(n.id, n.pos);
       this.indexedNodes = g.nodeCount;
     }
     return this.index;
@@ -978,7 +1383,6 @@ export class Adam {
   /** People who will come within sight of each other along this leg get a meeting at that moment. */
   private scheduleMeetings(id: NodeId, leg: { path: readonly Vec2[]; depart: number; arrive: number }, rt: Runtime): void {
     const w = this.world;
-    if (!w.registry.reactions.some((r) => r.on === "meets")) return;
     const len = pathLength(leg.path);
     const span = leg.arrive - leg.depart;
     const steps = Math.max(1, Math.ceil(span / 0.003));
@@ -1010,6 +1414,13 @@ export class Adam {
     ra.lastMet.set(d.b, w.time);
     rb.lastMet.set(d.a, w.time);
     emit(w, "adam", { kind: "met", a: d.a, b: d.b });
+    // They remember each other, and see what the other is doing (ADR-0033).
+    if (w.registry.types.get("Person")?.memorable) {
+      this.see({ person: d.a, subject: d.b });
+      this.see({ person: d.b, subject: d.a });
+    }
+    this.observe(d.a, d.b);
+    this.observe(d.b, d.a);
     this.react("meets", d.a, { other: d.b });
     this.react("meets", d.b, { other: d.a });
   }
@@ -1024,9 +1435,10 @@ export class Adam {
     const g = w.graph;
     const subject = g.node(d.subject);
     const person = g.node(d.person);
-    if (!subject?.pos || !person) return;
+    const where = subject?.type === "Person" ? this.positionOf(subject.id) : subject?.pos;
+    if (!subject || !where || !person) return;
     const type = w.registry.types.get(subject.type);
-    const at = round2(subject.pos);
+    const at = round2(where);
     const remembered: Attrs = {};
     for (const a of type?.remember ?? []) remembered[a] = subject.attrs[a] ?? null;
     const sighting = requireType(w.registry, "Sighting", "knowledge");

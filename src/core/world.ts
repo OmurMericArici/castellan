@@ -37,6 +37,8 @@ export interface Activity {
   readonly action: string;
   readonly startedAt: number;
   readonly leg?: Leg;
+  /** The method this is a step toward, when it is a sub-problem (ADR-0033). */
+  readonly for?: string;
 }
 
 export interface Leg {

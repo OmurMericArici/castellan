@@ -1,22 +1,27 @@
 {
   "pack": "hostility",
-  "version": "0.1.0",
-  "description": "Grudges and anger. Finding something you remembered emptied by someone else leaves a grudge against them; meeting them makes you angry; anger is vented by confronting them, and fades with time.",
-  "requires": ["core"],
+  "version": "0.2.0",
+  "description": "Grudges and anger. Finding something you remembered emptied by someone else leaves a grudge; meeting them makes you angry; anger is vented by confronting them. Killing is held back by strong restraint, but anger and fear wear it down: a very angry, very afraid person may kill.",
+  "requires": [
+    "core"
+  ],
   "types": {
     "Anger": {
       "kind": "mind",
-      "role": "need",
-      "description": "Flares on bad encounters, cools by itself.",
+      "role": "emotion",
+      "description": "Flares on bad encounters, cools by itself. Wears down restraint.",
       "start": 0,
       "rate": -0.4,
-      "urgentAt": 0.8
+      "urgentAt": 0.8,
+      "scales": {
+        "restraint": "1 - value * 0.4"
+      }
     },
     "Vent": {
       "kind": "mind",
       "role": "goal",
       "tier": 3,
-      "weight": "needs.Anger",
+      "weight": "emotions.Anger",
       "description": "Getting anger out."
     },
     "Confront": {
@@ -24,26 +29,119 @@
       "role": "action",
       "description": "Go to someone they hold a grudge against and have it out.",
       "steps": [
-        { "goto": { "linked": "grudge" } },
-        { "work": 0.01 },
-        { "effect": { "needs.Anger": -0.6 } }
+        {
+          "goto": {
+            "linked": "grudge"
+          }
+        },
+        {
+          "work": 0.01
+        },
+        {
+          "effect": {
+            "emotions.Anger": -0.6
+          }
+        }
       ],
-      "serves": { "Vent": "if(needs.Anger > 0.4, 1.2, 0)" }
+      "serves": {
+        "Vent": "if(emotions.Anger > 0.4, 1.2, 0)"
+      }
+    },
+    "Attack": {
+      "kind": "mind",
+      "role": "action",
+      "description": "Go to someone they hold a grudge against and kill them. Almost everyone is held back; fear and anger together can be enough.",
+      "restraint": 0.97,
+      "steps": [
+        {
+          "goto": {
+            "linked": "grudge"
+          }
+        },
+        {
+          "work": 0.01
+        },
+        {
+          "effect": {
+            "kill": "target",
+            "event": {
+              "name": "Murder",
+              "about": "target"
+            },
+            "emotions.Anger": -1
+          }
+        }
+      ],
+      "serves": {
+        "Vent": "clamp((emotions.Anger - 0.6) * 2.5, 0, 1) * clamp(emotions.Fear * 2 - 0.6, 0, 1) * 3"
+      }
+    }
+  },
+  "extends": {
+    "Fear": {
+      "scales": {
+        "restraint": "1 - value * 0.25"
+      }
     }
   },
   "edges": {
-    "grudge": { "from": "entity", "to": "entity", "description": "A person holds something against another person." }
+    "grudge": {
+      "from": "entity",
+      "to": "entity",
+      "description": "A person holds something against another person."
+    }
+  },
+  "events": {
+    "Murder": {
+      "seenWithin": 7,
+      "heard": "everyone",
+      "description": "Someone was killed."
+    }
   },
   "reactions": [
     {
       "on": "found-empty",
       "if": "it.lastTakenBy > 0 and it.lastTakenBy != self.id",
-      "do": { "link": { "edge": "grudge", "to": "it.lastTakenBy" }, "needs.Anger": 0.25 }
+      "do": {
+        "link": {
+          "edge": "grudge",
+          "to": "it.lastTakenBy"
+        },
+        "emotions.Anger": 0.25
+      }
     },
     {
       "on": "meets",
       "if": "rel.grudge",
-      "do": { "needs.Anger": 0.35 }
+      "do": {
+        "emotions.Anger": 0.35
+      }
+    },
+    {
+      "on": "witness",
+      "if": "event.name == \"Murder\"",
+      "do": {
+        "link": {
+          "edge": "grudge",
+          "to": "other"
+        },
+        "emotions.Fear": 0.5,
+        "prefer": {
+          "on": "other",
+          "method": "action",
+          "add": -0.4
+        }
+      },
+      "description": "Seeing a killing: a grudge against the killer, fear, and the killer is pushed away from the method they used (others react)."
+    },
+    {
+      "on": "meets",
+      "if": "did.Murder",
+      "do": {
+        "emotions.Fear": 0.3,
+        "emotions.Anger": 0.2
+      },
+      "description": "Meeting someone they know has killed."
     }
   ]
 }

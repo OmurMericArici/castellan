@@ -3,6 +3,28 @@
 Newest first. One entry per session: what changed, what was learned, what's next.
 Add a screenshot/GIF path whenever something is visible.
 
+## 2026-11-15 — M5b: the mind
+
+- Decided with the user: build ADR-0032 before M6. No predefined decision tree: each method states its
+  own local `requires` / `gives` over named facts, the engine plans backward at every decision, and
+  "house → wood → tree" emerges. Requirements are also derived from steps (`goto known Tree`).
+- Emotions are their own role (Fear, Anger, Dread moved from needs). One `scales` mechanism lets traits,
+  needs and emotions multiply goal weights, method scores, restraint and each other.
+- Methods are know-how (`knowsHow` edges): some known from birth, learned by watching and through the new
+  `talk` pack, preferred more or less; witnesses push a killer away from the method they used.
+- Events become shared `Report` claims (who did it, if seen) that spread by telling; `did.Murder` in
+  reactions. People remember each other from meetings. Determination is a trait.
+- `hostility` got `Attack`: restraint 0.97, worn down by anger and fear; an ordinary person very angry and
+  very afraid may kill.
+- Found while probing: preference ran away (short, always-finishing Wander reached the cap and pushed out
+  exploring) → success now saturates at 1.5 and failure alone never makes someone forget; people forgot
+  how to drink after repeated failures at an unreachable shore (same fix); `Loneliness`/`Belong` clashed
+  with the blind-test friendship pack → `Isolation`/`Company`.
+- Seed 8: two people who couldn't build were taught by neighbours; all six houses got built.
+- 74 tests (new `mind.test.ts`). PACKS.md format 0.6. ADR-0033. `scripts/probe.ts` prints a run summary.
+- Blind-test packs migrated mechanically to 0.6 (`needs.Anger`/`needs.Fear` → `emotions.*`); all three still pass check-pack.
+- **Next:** M6: WFC house layouts, story panel polish, Noah config in the URL, README with GIF → v0.1.
+
 ## 2026-11-15 — All primitives, traits, murder, pack order
 
 - Built all nine ADR-0029 primitives: un-startable actions aren't choices; bond data on edges (read, add,

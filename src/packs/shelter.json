@@ -1,6 +1,6 @@
 {
   "pack": "shelter",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "People need shelter: Molly plans houses where need, wood and land line up; people gather wood and build them; houses close together become a village.",
   "requires": [
     "core"
@@ -27,23 +27,6 @@
       },
       "description": "Secure a place to live."
     },
-    "Scout": {
-      "kind": "mind",
-      "role": "action",
-      "description": "Look for trees when they have a house to build but know too few.",
-      "serves": {
-        "Secure": {
-          "expr": "if(plan.active and knows.Tree < 6, 1, 0)"
-        }
-      },
-      "steps": [
-        {
-          "goto": {
-            "explore": true
-          }
-        }
-      ]
-    },
     "Gather": {
       "kind": "mind",
       "role": "action",
@@ -66,8 +49,12 @@
           }
         }
       ],
-      "serves": {
-        "Secure": "if(plan.missing - self.carrying > 0 and self.carrying < 4, 1, 0)"
+      "gives": [
+        "hasLoad"
+      ],
+      "knowhow": {
+        "innate": 0.8,
+        "watch": 0.4
       }
     },
     "Deliver": {
@@ -86,14 +73,17 @@
           }
         }
       ],
-      "serves": {
-        "Secure": "if(self.carrying > 0 and (self.carrying >= 4 or self.carrying >= plan.missing), 1.05, 0)"
-      }
+      "requires": [
+        "hasLoad"
+      ],
+      "gives": [
+        "siteReady"
+      ]
     },
     "Build": {
       "kind": "mind",
       "role": "action",
-      "description": "Work on the house once all the wood is there; then move in.",
+      "description": "Work on the house once all the wood is there; then move in. Not everyone knows how at first.",
       "steps": [
         {
           "goto": "plan"
@@ -107,7 +97,14 @@
         }
       ],
       "serves": {
-        "Secure": "if(plan.ready, 1.1, 0)"
+        "Secure": "if(plan.active, 1, 0)"
+      },
+      "requires": [
+        "siteReady"
+      ],
+      "knowhow": {
+        "innate": 0.7,
+        "watch": 0.5
       }
     },
     "House": {
@@ -188,5 +185,9 @@
       "to": "entity",
       "description": "A house belongs to a village."
     }
+  },
+  "facts": {
+    "hasLoad": "self.carrying > 0 and (self.carrying >= 4 or self.carrying >= plan.missing)",
+    "siteReady": "plan.ready"
   }
 }

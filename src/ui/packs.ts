@@ -3,6 +3,7 @@ import SHELTER from "../packs/shelter.json";
 import HUNGER from "../packs/hunger.json";
 import HOSTILITY from "../packs/hostility.json";
 import PSYCHOPATHY from "../packs/psychopathy.json";
+import TALK from "../packs/talk.json";
 import FRIENDSHIP from "../../examples/blind/friendship.json";
 import FOOD_STORAGE from "../../examples/blind/food-storage.json";
 
@@ -26,11 +27,12 @@ export const AVAILABLE: PackEntry[] = [
   entry(HUNGER),
   entry(HOSTILITY),
   entry(PSYCHOPATHY),
+  entry(TALK),
   entry(FRIENDSHIP, true),
   entry(FOOD_STORAGE, true),
 ];
 
-export const DEFAULT_ORDER = ["core", "shelter", "hunger", "hostility", "psychopathy"];
+export const DEFAULT_ORDER = ["core", "shelter", "hunger", "hostility", "psychopathy", "talk"];
 
 /** The enabled packs, in order, from `?packs=a,b,c` (or the default set). */
 export function packOrderFromUrl(params: URLSearchParams): string[] {

@@ -36,8 +36,8 @@ describe("behaviour written as packs (ADR-0026)", () => {
   });
 
   it("hostility: an emptied tree or bush breeds a grudge against whoever emptied it", () => {
-    // Grudges are rare now that berries regrow; seed 8 has some within 12 days.
-    const sim = running(8);
+    // Grudges are rare now that berries regrow; seed 11 has some within 12 days.
+    const sim = running(11);
     sim.run(12);
     const w = sim.world;
     const g = w.graph;
@@ -76,7 +76,7 @@ describe("behaviour written as packs (ADR-0026)", () => {
       pack: "bad",
       version: "0.1.0",
       requires: ["core"],
-      reactions: [{ on: "sees", if: "it.nonsense > 1", do: { "needs.Fear": 0.1 } }],
+      reactions: [{ on: "sees", if: "it.nonsense > 1", do: { "emotions.Fear": 0.1 } }],
     };
     const sim = running(1, [CORE, bad], DEFAULT_NOAH);
     expect(() => sim.run(1)).not.toThrow();
@@ -106,12 +106,12 @@ describe("Archie checks steps, reactions and memory", () => {
       version: "0.1.0",
       requires: ["core"],
       types: {
-        Peek: { kind: "mind", role: "action", steps: [{ goto: { known: "Person" } }], serves: { Grow: 1 } },
+        Peek: { kind: "mind", role: "action", steps: [{ goto: { known: "Sighting" } }], serves: { Grow: 1 } },
         Sniff: { kind: "mind", role: "action", steps: [{ goto: { known: "Tree", where: "it.age > 1" } }], serves: { Grow: 1 } },
         Hug: { kind: "mind", role: "action", steps: [{ effect: { link: { edge: "friend", to: "target" }, "needs.Love": 1 } }], serves: { Grow: 1 } },
       },
     });
-    expect(msgs).toMatch(/Peek.steps\[0\].goto.known: "Person" must be a memorable entity type/);
+    expect(msgs).toMatch(/Peek.steps\[0\].goto.known: "Sighting" must be a memorable entity type/);
     expect(msgs).toMatch(/Sniff.steps\[0\].goto.where: "it.age": people don't remember "age" of Tree/);
     expect(msgs).toMatch(/Hug.steps\[0\].effect.link: edge "friend" is not defined/);
     expect(msgs).toMatch(/Hug.steps\[0\].effect.needs.Love: "Love" is not a need type/);
@@ -126,12 +126,12 @@ describe("Archie checks steps, reactions and memory", () => {
       version: "0.1.0",
       requires: ["core"],
       types: { Rumour: { kind: "knowledge", memory: { recall: 2, forgetBelow: 3 } }, Rock: { kind: "entity", remember: ["size"] } },
-      reactions: [{ on: "meet", do: {} }, { on: "meets", if: "rel.friend", do: { "needs.Fear": 0.1 } }],
+      reactions: [{ on: "meet", do: {} }, { on: "meets", if: "rel.friend", do: { "emotions.Fear": 0.1 } }],
     });
     expect(msgs).toMatch(/reactions\[0\].on: must be one of .* \(did you mean "meets"\?\)/);
     expect(msgs).toMatch(/memory.forgetBelow: must be a number between 0 and 1/);
     expect(msgs).toMatch(/Rock.remember: only memorable entities have "remember"/);
-    const later = errorsOf({ pack: "bad", version: "0.1.0", requires: ["core"], reactions: [{ on: "meets", if: "rel.friend", do: { "needs.Fear": 0.1 } }] });
+    const later = errorsOf({ pack: "bad", version: "0.1.0", requires: ["core"], reactions: [{ on: "meets", if: "rel.friend", do: { "emotions.Fear": 0.1 } }] });
     expect(later).toMatch(/reactions\[0\].if: "rel.friend": edge "friend" is not defined/);
   });
 

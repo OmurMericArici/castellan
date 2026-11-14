@@ -1,9 +1,9 @@
 import { clockLabel, createSimulation, createWorld, DEFAULT_ADAM, genesis, isNight, loadPacks, withPackPlacement } from "../core";
 import type { NodeId } from "../core";
 import { DEFAULT_NOAH } from "./noah-default";
-import { AVAILABLE, packOrderFromUrl, sourcesFor } from "./packs";
+import { AVAILABLE, DEFAULT_ORDER, packOrderFromUrl, sourcesFor } from "./packs";
 import { drawWorld, renderSpace } from "./render";
-import { StoryBook } from "./story";
+import { PURPOSE, StoryBook } from "./story";
 
 const SCALE = 6;
 
@@ -51,7 +51,7 @@ function go(next: { seed?: number; packs?: string[] }): void {
   const q = new URLSearchParams();
   q.set("seed", String(next.seed ?? seed));
   const packs = next.packs ?? order;
-  if (packs.join(",") !== "core,shelter,hunger,hostility,psychopathy") q.set("packs", packs.join(","));
+  if (packs.join(",") !== DEFAULT_ORDER.join(",")) q.set("packs", packs.join(","));
   location.search = `?${q.toString()}`;
 }
 
@@ -129,13 +129,13 @@ const LABEL: Record<string, string> = {
   Explore: "exploring",
   Wander: "wandering",
   Rest: "resting",
-  Scout: "scouting for trees",
   Gather: "gathering wood",
   Deliver: "carrying wood to the site",
   Build: "building",
   Forage: "foraging",
-  SeekFood: "looking for food",
   Confront: "confronting someone",
+  Attack: "going after someone",
+  Chat: "chatting",
   Hide: "hiding at home",
   Murder: "stalking someone",
 };
@@ -152,14 +152,19 @@ function renderPanel(): void {
   const p = world.graph.node(selected);
   if (!p) return;
   const dead = p.attrs["dead"] === true;
-  const doing = world.activities.get(selected)?.action;
-  const needs = sim.adam.needLevels(selected);
-  const traits = Object.entries(sim.adam.traits(selected)).map(([k, v]) => `${k.toLowerCase()} ${v.toFixed(2)}`);
+  const activity = world.activities.get(selected);
+  const doing = activity?.action;
+  const mind = sim.adam.mind(selected);
+  const traits = Object.entries(mind.traits).map(([k, v]) => `${k.toLowerCase()} ${v.toFixed(2)}`);
+  const meter = (n: string, v: number, cls: string) =>
+    `<div class="need ${cls}"><span>${n}</span><meter min="0" max="1" low="0.4" high="0.7" optimum="0" value="${v.toFixed(3)}"></meter></div>`;
   const bars = dead
     ? ""
-    : Object.entries(needs)
-        .map(([n, v]) => `<div class="need"><span>${n}</span><meter min="0" max="1" low="0.4" high="0.7" optimum="0" value="${v.toFixed(3)}"></meter></div>`)
-        .join("");
+    : [...Object.entries(mind.needs).map(([n, v]) => meter(n, v, "")), ...Object.entries(mind.emotions).map(([n, v]) => meter(n, v, "emotion"))].join("");
+  const methods = Object.entries(sim.adam.methods(selected))
+    .map(([m, pref]) => (pref === 1 ? m : `${m} ${pref.toFixed(2)}`))
+    .join(", ");
+  const doingText = doing ? `${LABEL[doing] ?? doing}${activity?.for ? ` to ${PURPOSE[activity.for] ?? activity.for.toLowerCase()}` : ""}` : "—";
   const lines = story.lines(selected).map((l) => `<li>${l}</li>`).join("");
   const home = world.graph.edgesOf(selected, "livesIn").find((e) => e.from === selected);
   const village = home ? world.graph.edgesOf(home.to, "memberOf").map((e) => world.graph.node(e.to))[0] : undefined;
@@ -180,9 +185,10 @@ function renderPanel(): void {
   panel.innerHTML = `
     <h2>${String(p.attrs["name"] ?? `Person ${p.id}`)}${dead ? " †" : ""}</h2>
     ${status}
-    <p class="hint">${String(p.attrs["age"])} years · determination ${String(p.attrs["determination"])}${traits.length ? ` · ${traits.join(", ")}` : ""}${dead ? "" : ` · ${doing ? (LABEL[doing] ?? doing) : "—"}`} · knows ${sim.adam.knownCount(selected)} things</p>
+    <p class="hint">${String(p.attrs["age"])} years ${traits.length ? ` · ${traits.join(", ")}` : ""}${dead ? "" : ` · ${doingText}`} · knows ${sim.adam.knownCount(selected)} things</p>
     <p class="hint">${homeLine}${relations.length ? ` · ${relations.join(" · ")}` : ""}</p>
     <div class="needs">${bars}</div>
+    <p class="hint">knows how to: ${methods || "nothing"}</p>
     <ol class="story">${lines}</ol>`;
 }
 

@@ -3,7 +3,7 @@
  *
  *   npm run check-pack -- path/to/my-pack.json [more.json] [--days 10] [--seed 1] [--place Type=count ...]
  *
- * The default packs (core, shelter, hunger, hostility) are always loaded first,
+ * The default packs (core, shelter, hunger, hostility, psychopathy, talk) are always loaded first,
  * so a new pack can require any of them. `--place Type=count` asks Noah to place
  * leaves of a new leaf type at the start (on dry land).
  */
@@ -14,6 +14,8 @@ import CORE from "../src/packs/core.json";
 import SHELTER from "../src/packs/shelter.json";
 import HUNGER from "../src/packs/hunger.json";
 import HOSTILITY from "../src/packs/hostility.json";
+import PSYCHOPATHY from "../src/packs/psychopathy.json";
+import TALK from "../src/packs/talk.json";
 import { DEFAULT_NOAH } from "../src/ui/noah-default";
 
 const args = process.argv.slice(2);
@@ -25,7 +27,7 @@ for (let i = 0; i < args.length; i++) {
   const a = args[i]!;
   if (a === "--help" || a === "-h") {
     console.log("usage: npm run check-pack -- my-pack.json [more.json] [--days 10] [--seed 1] [--place Type=count ...]");
-    console.log("  Loads core, shelter, hunger, hostility, then your packs; Archie checks them; then a short simulation.");
+    console.log("  Loads core, shelter, hunger, hostility, psychopathy, talk, then your packs; Archie checks them; then a short simulation.");
     console.log("  --place Type=count  Noah places that many of a leaf type at the start (new leaf types are placed only this way)");
     process.exit(0);
   }
@@ -51,7 +53,7 @@ for (const f of files) {
   }
 }
 
-const defaults = [CORE, SHELTER, HUNGER, HOSTILITY];
+const defaults = [CORE, SHELTER, HUNGER, HOSTILITY, PSYCHOPATHY, TALK];
 const check = checkPacks([...defaults, ...user]);
 if (!check.ok) {
   console.log(`✗ Archie rejected the packs (${check.errors.length} problem${check.errors.length === 1 ? "" : "s"}):`);
@@ -91,7 +93,7 @@ console.log("  people at the end:");
 for (const p of sim.adam.people()) {
   const needs = Object.entries(sim.adam.needLevels(p.id)).map(([k, v]) => `${k} ${v.toFixed(2)}`).join(", ");
   const own = Object.entries(p.attrs)
-    .filter(([k, v]) => !["name", "age", "determination"].includes(k) && !isLazy(v) && v !== null)
+    .filter(([k, v]) => !["name", "age"].includes(k) && !isLazy(v) && v !== null)
     .map(([k, v]) => `${k}=${String(v)}`)
     .join(" ");
   console.log(`    ${String(p.attrs["name"])}: doing ${world.activities.get(p.id)?.action ?? "-"}; ${needs}${own ? `; ${own}` : ""}`);

@@ -1,12 +1,12 @@
 {
   "pack": "core",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "The basic things of a Castellan world: people, trees, stones, what people can know, and the first pieces of a mind.",
   "types": {
     "Person": {
       "kind": "entity",
       "leaf": true,
-      "description": "A person's body in the world. Their mind and knowledge are edges to shared nodes.",
+      "description": "A person's body in the world. Their mind and knowledge are edges to shared nodes. Others remember where they last saw them.",
       "attrs": {
         "name": {
           "type": "string",
@@ -22,22 +22,14 @@
           },
           "description": "Years."
         },
-        "determination": {
-          "type": "number",
-          "min": 0,
-          "max": 1,
-          "default": {
-            "expr": "round(rand_range(0.1, 0.9) * 100) / 100"
-          },
-          "description": "How strongly they stick with what they are doing (ADR-0016)."
-        },
         "carrying": {
           "type": "number",
           "min": 0,
           "default": 0,
           "description": "Material units in hand (set by the engine)."
         }
-      }
+      },
+      "memorable": true
     },
     "Tree": {
       "kind": "entity",
@@ -98,10 +90,48 @@
         "forgetBelow": 0.2
       }
     },
+    "Report": {
+      "kind": "knowledge",
+      "description": "A claim that an event happened (ADR-0033): `about` is who it happened to, `actor` who did it, if anyone saw. Witnesses and those who hear or are told share the same claim.",
+      "attrs": {
+        "event": {
+          "type": "string"
+        },
+        "day": {
+          "type": "number"
+        },
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        }
+      },
+      "memory": {
+        "recall": 1,
+        "fade": -0.004,
+        "reinforce": 1,
+        "forgetBelow": 0.1
+      }
+    },
+    "Determination": {
+      "kind": "mind",
+      "role": "trait",
+      "description": "How strongly someone sticks with what they are doing (ADR-0016). Adam reads it when deciding whether to be interrupted.",
+      "distribution": {
+        "histogram": [
+          [
+            0.1,
+            0.9,
+            1
+          ]
+        ]
+      }
+    },
     "Fear": {
       "kind": "mind",
-      "role": "need",
-      "description": "The need to feel safe. Rises fast after dark, fades by day.",
+      "role": "emotion",
+      "description": "Feeling unsafe. Rises fast after dark, fades by day.",
       "start": 0,
       "rate": {
         "expr": "if(night, 6, -8)"
@@ -125,7 +155,7 @@
       "role": "goal",
       "tier": 1,
       "weight": {
-        "expr": "needs.Fear"
+        "expr": "emotions.Fear"
       },
       "description": "Stay alive and safe."
     },
@@ -212,6 +242,10 @@
           "min": 0,
           "max": 1,
           "default": 1
+        },
+        "from": {
+          "type": "number",
+          "description": "Who told them, if they were told."
         }
       }
     },
@@ -231,6 +265,35 @@
           "max": 1
         }
       }
+    },
+    "knowsHow": {
+      "from": "entity",
+      "to": "mind",
+      "description": "A person knows a method (ADR-0032). Their side carries how much they prefer it and how they learned it.",
+      "fromData": {
+        "preference": {
+          "type": "number",
+          "min": 0,
+          "max": 3,
+          "default": 1
+        },
+        "learnedAt": {
+          "type": "number"
+        },
+        "how": {
+          "type": "string",
+          "description": "born, watched or taught"
+        },
+        "from": {
+          "type": "number",
+          "description": "Who they learned it from."
+        }
+      }
+    },
+    "actor": {
+      "from": "knowledge",
+      "to": "entity",
+      "description": "Who did what a Report describes."
     }
   },
   "place": {
@@ -253,5 +316,27 @@
         "water": 0.05
       }
     }
-  }
+  },
+  "reactions": [
+    {
+      "on": "finished",
+      "do": {
+        "prefer": {
+          "method": "action",
+          "add": "(1.5 - preference) * 0.05"
+        }
+      },
+      "description": "What works gets preferred, up to a point."
+    },
+    {
+      "on": "failed",
+      "do": {
+        "prefer": {
+          "method": "action",
+          "add": "if(preference > 0.6, -0.02, 0)"
+        }
+      },
+      "description": "What fails gets preferred a little less; failing alone never makes someone forget a method (only others can push them that far)."
+    }
+  ]
 }

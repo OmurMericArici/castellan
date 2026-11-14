@@ -66,4 +66,5 @@ even while the record is still proposed.
 | 0029 | [Blind pack test: results and the missing primitives](0029-blind-test-gaps.md) | accepted |
 | 0030 | [Traits with distributions, world events, death, pack order and overrides](0030-traits-events-pack-order.md) | accepted |
 | 0031 | [How ADR-0029/0030 were built](0031-primitives-built.md) | accepted (technical) |
-| 0032 | [A problem-solving mind: methods, emotions, new node types, morality](0032-problem-solving-mind.md) | accepted (timing open) |
+| 0032 | [A problem-solving mind: methods, emotions, new node types, morality](0032-problem-solving-mind.md) | accepted (built in M5b) |
+| 0033 | [The mind, built: planning over facts, emotions and scales, know-how, remembered events](0033-mind-built.md) | accepted (technical) |
