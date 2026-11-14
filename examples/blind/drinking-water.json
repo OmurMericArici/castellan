@@ -1,0 +1,90 @@
+{
+  "pack": "drinking-water",
+  "version": "0.1.0",
+  "description": "People get thirsty and drink from springs they remember; with no spring known, they go looking.",
+  "requires": [
+    "core"
+  ],
+  "types": {
+    "Spring": {
+      "kind": "entity",
+      "leaf": true,
+      "memorable": true,
+      "description": "A spring of drinking water. It never runs dry. Noah must be asked to place springs (--place Spring=N); they are not tied to lakes (see notes).",
+      "attrs": {
+        "water": {
+          "type": "number",
+          "min": 0,
+          "default": 1,
+          "description": "1 while it gives water. Never lowered by this pack; kept so a later pack can dry springs up."
+        }
+      },
+      "remember": [
+        "water"
+      ]
+    },
+    "Thirst": {
+      "kind": "mind",
+      "role": "need",
+      "description": "The need to drink. Rises steadily; drinking lowers it.",
+      "start": {
+        "expr": "rand_range(0, 0.3)"
+      },
+      "rate": 0.9,
+      "urgentAt": 0.7
+    },
+    "Quench": {
+      "kind": "mind",
+      "role": "goal",
+      "tier": 1,
+      "weight": {
+        "expr": "clamp((needs.Thirst - 0.25) * 2, 0, 1)"
+      },
+      "description": "Drink before thirst becomes dangerous. Barely matters below a quarter thirst, then grows fast."
+    },
+    "Drink": {
+      "kind": "mind",
+      "role": "action",
+      "description": "Walk to a remembered spring that still has water and drink.",
+      "serves": {
+        "Quench": {
+          "expr": "if(knows.Spring > 0, 1, 0)"
+        }
+      },
+      "steps": [
+        {
+          "goto": {
+            "known": "Spring",
+            "where": "it.water > 0"
+          }
+        },
+        {
+          "work": 0.01
+        },
+        {
+          "effect": {
+            "needs.Thirst": -0.8
+          }
+        }
+      ]
+    },
+    "SeekWater": {
+      "kind": "mind",
+      "role": "action",
+      "description": "Thirsty with no known water: head into the unknown to find some.",
+      "serves": {
+        "Quench": {
+          "expr": "if(knows.Spring == 0, 0.8, 0)"
+        }
+      },
+      "steps": [
+        {
+          "goto": {
+            "explore": true
+          }
+        }
+      ]
+    }
+  },
+  "reactions": []
+}

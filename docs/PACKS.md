@@ -46,12 +46,24 @@ Types: `Person` (attrs `name`, `age`, `determination`, `carrying`), `Tree`
 needs `Fear`, `Fatigue`, goals `Survive` (tier 1), `Recover` (2), `Grow` (4),
 actions `Explore`, `Wander`, `Rest`. Edges `knows`, `about`, `has`.
 
+## The other default packs
+
+Always loaded with `core`; you may `require` and use them.
+
+| Pack | Gives |
+|---|---|
+| `shelter` | need `Shelter`, goal `Secure` (tier 2), actions `Scout`, `Gather` (wood into `Person.carrying`), `Deliver` (`carrying` → the site's `stock`), `Build`; entities `House` (build rule) and `Village` (recognised); edges `builds`, `livesIn`, `memberOf`. `home` and `plan.*` come from it. |
+| `hunger` | leaf `Bush` (memorable, remembers `food`, spreads), need `Hunger`, goal `Eat` (tier 1), actions `Forage` (eat one `food` on the spot, Hunger −0.4) and `SeekFood` |
+| `hostility` | need `Anger`, goal `Vent` (tier 3), action `Confront`, edge `grudge` (person → person), reactions on `found-empty` and `meets` |
+
+Note: `Person.carrying` is shared. Shelter's `Deliver` gives whatever is carried to a building site, so a pack that also uses `carrying` for something else will mix with wood.
+
 ## Types
 
 | Key | Meaning |
 |---|---|
 | `kind` | `entity` (exists in the world, has a place), `knowledge` (a shared claim), or `mind` (a shared piece of how people think) |
-| `leaf` | entities: `true` means Noah may place it at the start. Derived things (houses) are never leaves. |
+| `leaf` | entities: `true` means Noah *may* place it at the start; how many is set in Noah's configuration, not in the pack (`npm run check-pack -- … --place Bush=40`). Entropy can grow more with `spread`. Derived things (houses) are never leaves. |
 | `memorable` | entities: people remember seeing it (they form a `Sighting`) and can `goto` it by memory |
 | `remember` | memorable entities: attributes people notice and remember, readable later as `it.<attr>`. Memory can be out of date. |
 | `memory` | knowledge types: how well people remember (see Memory) |
@@ -83,10 +95,10 @@ or an expression: `"needs.Hunger * 2"` (or `{ "expr": "…" }`).
 | `night` | true from dusk (21:00) to dawn (06:00) |
 | `doing` | name of their current action |
 | `self.age`, `self.id` | the person's attributes and id |
-| `plan.active`, `plan.missing`, `plan.ready`, `plan.workLeft` | their building project (shelter) |
+| `plan.active`, `plan.missing`, `plan.ready`, `plan.workLeft` | their building project: whatever they are building under any `build` rule (one at a time) |
 | `home` | true once they live in something they built |
 | `target.<attr>`, `target.id` | inside steps: what the action is aimed at (its real state, they are there) |
-| `it.<attr>` | in `where`: what the person **remembers** of a thing; in reactions: the thing involved |
+| `it.<attr>` | in `where`: what the person **remembers** of a thing (only `remember`ed attributes); in reactions: the thing's **real** attributes |
 | `other.<attr>`, `other.id` | in reactions to `meets`: the other person |
 | `rel.<edge>` | in reactions to `meets`: true if the person has that edge to the other |
 | `action` | in reactions to `finished`: the action that ended |
@@ -114,6 +126,17 @@ instant.
 | `stay` | `{ "stay": true }` | stay put until they re-think (resting) |
 
 When the last step is done the action ends and the person chooses again.
+
+What ends an action early: a `goto` with nowhere to go (unless `optional`), a
+`take` that finds nothing, a failing `if`. The person then chooses again at once.
+**Choosing can't see whether a `goto` will find a target**, so make `serves`
+depend on something visible (`knows.Bush > 0`, a need, `self.<attr>`) or the
+person may keep picking an action that ends immediately. The engine stops such
+loops after three tries at the same moment by having the person wait.
+
+Steps and effects may read and write attributes a type does not declare (the
+engine stores them), but declare them anyway so others know they exist.
+
 
 ### Effects
 
@@ -143,6 +166,12 @@ A reaction runs effects when something happens to a person.
 | `finished` | an action ended normally | `action` |
 | `dusk`, `dawn` | Molly's day signals | |
 
+All reactions for an event run in pack load order, and each sees the effects of
+the ones before it (an edge added by the first is visible to `rel.*` in the
+second). A `meets` happens when someone starts walking and will pass within
+sight of another person; the same pair meets at most once every 0.5 days, so
+people standing together don't meet over and over.
+
 ## Memory
 
 On a knowledge type (`core` puts it on `Sighting`):
@@ -171,7 +200,7 @@ need, remembered material and a good spot line up; actions do the rest
 | `work` | days of work once all material is delivered |
 | `planner`, `resident` | edges from the person to the project and to the finished thing |
 | `when` | how much the person needs it, 0..1 |
-| `spot` | how good a place is, 0..1; reads `field.<name>` there |
+| `spot` | how good a place is, 0..1; reads `field.<name>` there (fields: `height`, `water`, `fertility`; this is the only place fields can be read for now) |
 | `near` | never closer than `min` to another of the same type; best within `prefer` |
 | `wear` | condition lost per day once built |
 
@@ -182,7 +211,8 @@ The engine keeps progress in `state` (`planned`/`built`), `stock`, `worked`,
 `full`, `formAt`, `memberEdge`.
 
 **`spread`** — Entropy grows more of a leaf: `every` (days), `count`, `radius`,
-optional `field` (only where it is above 0.3).
+optional `field` (only where it is above 0.3). New ones always land on walkable
+ground, so `"field": "water"` means the shore.
 
 ## Attributes
 

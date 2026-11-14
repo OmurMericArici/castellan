@@ -3,6 +3,14 @@
 Newest first. One entry per session: what changed, what was learned, what's next.
 Add a screenshot/GIF path whenever something is visible.
 
+## 2026-11-15 — Blind pack test
+
+- New tool: `npm run check-pack -- pack.json` (Archie + a short simulation + runtime warnings).
+- Three fresh agents wrote packs from PACKS.md + core.json alone: friendship, drinking water, food storage
+  (`examples/blind/`). All accepted by Archie on the first try and all work in simulation, each with a
+  compromise. Gaps and proposed primitives in ADR-0029.
+- Fixed: `spread` on the water field could never succeed; checker reporting; PACKS.md gaps they hit.
+
 ## 2026-11-15 — M5 Behaviour in packs
 
 - Engine work: Adam no longer knows verbs. Actions are step programs (goto, work, take, give, effect,

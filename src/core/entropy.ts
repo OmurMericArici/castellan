@@ -49,7 +49,8 @@ export class Entropy {
       const r = 1 + rng.next() * rule.radius;
       const x = parent.pos!.x + Math.cos(a) * r;
       const y = parent.pos!.y + Math.sin(a) * r;
-      if (!passable(space, x, y, { maxWater: 0.05, slopeCost: 0 })) continue;
+      // Must be walkable land; with a water field rule this means the shore.
+      if (!passable(space, x, y)) continue;
       if (field && field.sample(x, y) < 0.3) continue;
       const id = w.graph.allocateNodeId();
       const attrs = instantiateAttrs(type, createRng(w.seed).fork(hash2(id, 0x656e7472)));

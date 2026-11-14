@@ -1,0 +1,138 @@
+{
+  "pack": "friendship",
+  "version": "0.1.0",
+  "description": "People who meet joke around; each good encounter moves them a step closer, and after three they are friends who seek each other out, feel less lonely and calm each other down.",
+  "requires": [
+    "core",
+    "hostility"
+  ],
+  "types": {
+    "Loneliness": {
+      "kind": "mind",
+      "role": "need",
+      "description": "The need for company. Rises slowly, drops when joking with someone or spending time with a friend.",
+      "start": {
+        "expr": "rand_range(0.2, 0.5)"
+      },
+      "rate": {
+        "expr": "if(doing == \"VisitFriend\", -1.5, 0.3)"
+      },
+      "urgentAt": 0.7
+    },
+    "Attachment": {
+      "kind": "mind",
+      "role": "need",
+      "description": "Workaround flag: 0 until the person has made a first friend, then 1. Needs are the only per-person number a pack can write, so it stands in for 'has at least one friend edge'.",
+      "start": 0,
+      "rate": 0,
+      "urgentAt": 1
+    },
+    "Belong": {
+      "kind": "mind",
+      "role": "goal",
+      "tier": 3,
+      "weight": {
+        "expr": "needs.Loneliness"
+      },
+      "description": "Be among people one likes."
+    },
+    "VisitFriend": {
+      "kind": "mind",
+      "role": "action",
+      "description": "Walk to the nearest friend and hang out for a while.",
+      "serves": {
+        "Belong": {
+          "expr": "if(needs.Attachment > 0.5, 1, 0)"
+        }
+      },
+      "steps": [
+        {
+          "goto": {
+            "linked": "friend"
+          }
+        },
+        {
+          "work": 0.08
+        },
+        {
+          "effect": {
+            "needs.Loneliness": -0.3,
+            "needs.Anger": -0.2
+          }
+        }
+      ]
+    }
+  },
+  "edges": {
+    "joked": {
+      "from": "entity",
+      "to": "entity",
+      "description": "They have shared a joke once: an acquaintance."
+    },
+    "laughedWith": {
+      "from": "entity",
+      "to": "entity",
+      "description": "They have had a second good encounter: the jokes landed again."
+    },
+    "friend": {
+      "from": "entity",
+      "to": "entity",
+      "description": "Three good encounters in: they are friends."
+    }
+  },
+  "reactions": [
+    {
+      "on": "meets",
+      "if": "rel.friend",
+      "do": {
+        "needs.Loneliness": -0.3,
+        "needs.Anger": -0.3,
+        "needs.Fear": -0.1
+      }
+    },
+    {
+      "on": "meets",
+      "if": "rel.laughedWith and not rel.friend and not rel.grudge and needs.Anger < 0.6",
+      "do": {
+        "needs.Loneliness": -0.2,
+        "link": {
+          "edge": "friend",
+          "to": "other"
+        },
+        "needs.Attachment": 1
+      }
+    },
+    {
+      "on": "meets",
+      "if": "rel.joked and not rel.laughedWith and not rel.grudge and needs.Anger < 0.6",
+      "do": {
+        "needs.Loneliness": -0.15,
+        "link": {
+          "edge": "laughedWith",
+          "to": "other"
+        }
+      }
+    },
+    {
+      "on": "meets",
+      "if": "not rel.joked and not rel.grudge and needs.Anger < 0.6",
+      "do": {
+        "needs.Loneliness": -0.1,
+        "link": {
+          "edge": "joked",
+          "to": "other"
+        }
+      }
+    },
+    {
+      "on": "meets",
+      "if": "rel.friend and rel.grudge",
+      "do": {
+        "unlink": {
+          "edge": "grudge",
+          "to": "other"
+        }
+      }
+    }
+  ]
+}

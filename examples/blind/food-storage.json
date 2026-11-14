@@ -1,0 +1,42 @@
+{
+  "pack": "food-storage",
+  "version": "0.1.0",
+  "description": "While not hungry, people pick extra berries and keep them in hand; when hunger comes they eat from that stash instead of walking to a bush.",
+  "requires": ["core", "hunger"],
+  "types": {
+    "Provide": {
+      "kind": "mind",
+      "role": "goal",
+      "tier": 2,
+      "weight": { "expr": "0.35 * (1 - needs.Hunger) * if(night, 0, 1)" },
+      "description": "Put food by for later while not hungry (daytime only)."
+    },
+    "Stash": {
+      "kind": "mind",
+      "role": "action",
+      "description": "With empty hands, walk to a bush remembered to have berries and pick a few to keep.",
+      "serves": {
+        "Provide": { "expr": "if(home and self.carrying == 0 and knows.Bush > 0, 1, 0)" }
+      },
+      "steps": [
+        { "if": "self.carrying == 0" },
+        { "goto": { "known": "Bush", "where": "it.food > 0" } },
+        { "work": 0.03 },
+        { "take": { "from": "food", "to": "carrying", "amount": 3 } }
+      ]
+    },
+    "EatStored": {
+      "kind": "mind",
+      "role": "action",
+      "description": "Eat one stashed berry portion from hand, wherever they are.",
+      "serves": {
+        "Eat": { "expr": "if(self.carrying > 0 and needs.Hunger > 0.4, 1.2, 0)" }
+      },
+      "steps": [
+        { "if": "self.carrying > 0" },
+        { "work": 0.01 },
+        { "effect": { "needs.Hunger": -0.4, "self.carrying": "self.carrying - 1" } }
+      ]
+    }
+  }
+}

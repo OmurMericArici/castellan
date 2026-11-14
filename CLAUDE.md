@@ -19,6 +19,7 @@ Read `docs/SCOPE.md` (current milestone) and the latest `docs/DEVLOG.md` entry f
 - `npm test` — Vitest
 - `npm run typecheck` — includes the no-DOM check for `src/core`
 - `npm run build` — typecheck + production build to `dist/`
+- `npm run check-pack -- file.json` — Archie + 10-day simulation for a pack (`--help`)
 
 ## Engine or pack? (ADR-0027)
 Castellan is an engine; our content is its default pack. Before writing engine code for a
