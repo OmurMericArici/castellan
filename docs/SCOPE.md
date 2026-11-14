@@ -53,8 +53,9 @@ New ideas go here, not into the current milestone. Each one gets a date and one 
 Moving an item into scope needs a decision record.
 
 - 2026-11-14 — Villages that merge, split or dissolve; houses that collapse when their condition hits zero; repair.
-- 2026-11-15 — Problem-solving mind (ADR-0032): problems → learned, preferred methods → sub-problems, down to steps; replaces flat action choice.
-- 2026-11-15 — Emotions beside needs (ADR-0032), e.g. high sexual desire raises aggression.
+- 2026-11-15 — Problem-solving mind with GOAP (ADR-0032): methods with preconditions/effects, learned and preferred; no depth limit; replaces flat action choice.
+- 2026-11-15 — Emotions as multipliers on goals, method preferences and restraint thresholds (ADR-0032); traits and emotions supporting or suppressing each other.
+- 2026-11-15 — Learning by observation (engine) and talk (pack); schools as a pack.
 - 2026-11-15 — Declared interactions between node types; packs adding new node kinds (ADR-0032).
 - 2026-11-15 — Mating and marriage as methods (desire → find a mate → a friend of the opposite sex → marry).
 - 2026-11-15 — Watching morality emerge in a crowded, long simulation (methods punished or rewarded by others' reactions).

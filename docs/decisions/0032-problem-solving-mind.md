@@ -1,6 +1,6 @@
 # 0032 — A problem-solving mind: methods, emotions, new node types, morality
 
-- Status: proposed (direction noted for after v0.1)
+- Status: accepted (direction and the open questions settled; timing open)
 - Date: 2026-11-15
 
 ## Context
@@ -50,10 +50,28 @@ The user described the next layer of the mind and asked for it to be noted.
 - Needs crowds and long runs: performance work (and probably a Web Worker) comes with it.
 - Fits ADR-0027: the planner is engine; methods, emotions and interactions are pack content.
 
-## Open
-- Planner style (HTN decomposition vs GOAP search), and how deep it may search per decision.
-- How learning works without neural networks (ADR-0004): success counts, imitation, being taught.
-- Whether emotions are a fourth mind role or a new kind of state.
+## Settled (2026-11-15)
+1. **GOAP**, chosen for emergence: methods declare preconditions and effects on what
+   the person believes; the planner searches backward from the goal to steps the
+   person can take now. **No depth limit.** Plans stay short in practice (a house
+   is a few links from "go to a tree"), and planning is part of the person's thinking,
+   which runs inside simulated time like everything else.
+2. **Learning through talk and observation**, both as mechanics: watching someone use
+   a method can teach it; talking passes knowledge and methods on. Talking itself is
+   a **pack**; a good enough pack could even let people build schools.
+3. **Emotions are multipliers** on other behaviour: they scale goal weights, method
+   preferences and the thresholds that hold people back. Existing nodes and packs get
+   updated to read them. All fuzzy:
+   - someone who would never kill might, when very afraid and very angry;
+   - two people who wouldn't mate might, when very happy or very deprived.
+4. **Traits and emotions support or suppress each other**: a mechanic for one mind
+   value raising or damping another (an angry person is less friendly at the same time).
+5. No neural networks (ADR-0004): the mind is built by hand, and grows emergently
+   through learning, preference and others' reactions.
+
+## Still open
+- When: before v0.1 (M6) or right after.
+- The exact shape of method preconditions/effects (which facts a person's belief state has).
 
 ## Discussion
 - 2026-11-15 — User: note these to add: new node types and interactions between
@@ -64,3 +82,11 @@ The user described the next layer of the mind and asked for it to be noted.
   marry. If behaviour isn't modelled this way already, we will switch to it. These
   methods should be learnable and preferable, which brings morality; in a crowded,
   long enough simulation we could watch morality emerge.
+- 2026-11-15 — User: use GOAP for emergence; no depth limit, the thought process
+  runs anyway and reaching "cut a tree" takes few steps. Learning by adding talk and
+  observation mechanics; talk via a pack (a good enough pack even allows building a
+  school). Emotions are a multiplier affecting other behaviours, which means updating
+  existing nodes: someone who normally wouldn't kill can when scared and angry; two
+  people who normally wouldn't mate can when very happy or very deprived. All fuzzy.
+  No neural network, but built by hand and emergently. Traits can support or
+  suppress each other (an angry person may not be very friendly at the same time).
