@@ -1,6 +1,6 @@
 {
   "pack": "core",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "The basic things of a Castellan world: people, trees, stones, what people can know, and the first pieces of a mind.",
   "types": {
     "Person": {
@@ -29,7 +29,8 @@
           "description": "Material units in hand (set by the engine)."
         }
       },
-      "memorable": true
+      "memorable": true,
+      "plural": "people"
     },
     "Tree": {
       "kind": "entity",
@@ -190,7 +191,12 @@
             "explore": true
           }
         }
-      ]
+      ],
+      "words": {
+        "doing": "exploring",
+        "did": "explored",
+        "name": "explore"
+      }
     },
     "Wander": {
       "kind": "mind",
@@ -205,7 +211,12 @@
             "wander": 6
           }
         }
-      ]
+      ],
+      "words": {
+        "doing": "wandering",
+        "did": "wandered",
+        "name": "wander"
+      }
     },
     "Rest": {
       "kind": "mind",
@@ -225,7 +236,12 @@
         {
           "stay": true
         }
-      ]
+      ],
+      "words": {
+        "doing": "resting",
+        "did": "rested",
+        "name": "rest"
+      }
     }
   },
   "edges": {
@@ -338,5 +354,60 @@
       },
       "description": "What fails gets preferred a little less; failing alone never makes someone forget a method (only others can push them that far)."
     }
-  ]
+  ],
+  "watch": {
+    "color": "#5b7a99",
+    "tables": {
+      "People": {
+        "rows": "Person",
+        "columns": {
+          "Age": "self.age",
+          "Doing": "doing",
+          "Fear": "emotions.Fear",
+          "Fatigue": "needs.Fatigue",
+          "Determination": "traits.Determination",
+          "Trees known": "knows.Tree"
+        },
+        "sort": "Fear"
+      }
+    },
+    "logs": {
+      "Learning": {
+        "Watched": {
+          "on": "learned",
+          "if": "how == \"watched\"",
+          "text": "{self.name} learned to {words.name} by watching {other.name}",
+          "global": true
+        },
+        "Taught": {
+          "on": "learned",
+          "if": "how == \"taught\"",
+          "text": "{other.name} taught {self.name} to {words.name}",
+          "global": true
+        }
+      },
+      "Life": {
+        "Death": {
+          "on": "died",
+          "text": "{self.name} died",
+          "global": true,
+          "emphasis": "strong"
+        }
+      },
+      "Day": {
+        "Dusk": {
+          "on": "signal",
+          "if": "signal == \"dusk\"",
+          "text": "Night fell",
+          "emphasis": "quiet"
+        },
+        "Dawn": {
+          "on": "signal",
+          "if": "signal == \"dawn\"",
+          "text": "Day broke",
+          "emphasis": "quiet"
+        }
+      }
+    }
+  }
 }

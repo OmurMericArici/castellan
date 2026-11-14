@@ -1,15 +1,40 @@
 {
   "pack": "psychopathy",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A rare trait that weakens restraint, fear and dread. In the few who have it strongly, an urge to kill grows until they act. A murder is noticed: witnesses know who did it and hate them; everyone else hears of it and dreads. Dread sends people home.",
-  "requires": ["core", "hostility"],
+  "requires": [
+    "core",
+    "hostility"
+  ],
   "types": {
     "Psychopathy": {
       "kind": "mind",
       "role": "trait",
       "description": "How little someone feels for others. Most people: almost none; a few: a lot.",
-      "distribution": { "histogram": [[0, 0.1, 88], [0.1, 0.5, 9], [0.75, 1, 3]] },
-      "scales": { "restraint": "1 - value * 0.9", "emotion.Fear": "1 - value * 0.6", "emotion.Dread": "1 - value * 0.8" }
+      "distribution": {
+        "histogram": [
+          [
+            0,
+            0.1,
+            88
+          ],
+          [
+            0.1,
+            0.5,
+            9
+          ],
+          [
+            0.75,
+            1,
+            3
+          ]
+        ]
+      },
+      "scales": {
+        "restraint": "1 - value * 0.9",
+        "emotion.Fear": "1 - value * 0.6",
+        "emotion.Dread": "1 - value * 0.8"
+      }
     },
     "Bloodlust": {
       "kind": "mind",
@@ -40,30 +65,154 @@
       "description": "Go to the nearest person and kill them.",
       "restraint": 0.6,
       "steps": [
-        { "goto": { "person": "nearest", "within": 25 } },
-        { "work": 0.01 },
-        { "effect": { "kill": "target", "event": { "name": "Murder", "about": "target" }, "needs.Bloodlust": -1 } }
+        {
+          "goto": {
+            "person": "nearest",
+            "within": 25
+          }
+        },
+        {
+          "work": 0.01
+        },
+        {
+          "effect": {
+            "kill": "target",
+            "event": {
+              "name": "Murder",
+              "about": "target"
+            },
+            "needs.Bloodlust": -1
+          }
+        }
       ],
-      "serves": { "Prey": "if(needs.Bloodlust > 0.6, 1.3, 0)" }
+      "serves": {
+        "Prey": "if(needs.Bloodlust > 0.6, 1.3, 0)"
+      },
+      "words": {
+        "doing": "stalking someone",
+        "did": "stalked someone",
+        "purpose": "kill",
+        "name": "kill"
+      }
     },
     "Hide": {
       "kind": "mind",
       "role": "action",
       "description": "Go home (if they have one) and stay inside while dread is high.",
-      "steps": [{ "goto": "home", "optional": true }, { "stay": true }],
-      "serves": { "Survive": "if(emotions.Dread > 0.4, 1.2, 0)" }
+      "steps": [
+        {
+          "goto": "home",
+          "optional": true
+        },
+        {
+          "stay": true
+        }
+      ],
+      "serves": {
+        "Survive": "if(emotions.Dread > 0.4, 1.2, 0)"
+      },
+      "words": {
+        "doing": "hiding at home",
+        "did": "hid at home",
+        "purpose": "hide",
+        "name": "hide"
+      }
     }
   },
   "extends": {
-    "Survive": { "weight": "max(emotions.Fear, emotions.Dread)" }
+    "Survive": {
+      "weight": "max(emotions.Fear, emotions.Dread)"
+    }
   },
   "edges": {
-    "hates": { "from": "entity", "to": "entity", "description": "A person hates another (here: a killer)." }
+    "hates": {
+      "from": "entity",
+      "to": "entity",
+      "description": "A person hates another (here: a killer)."
+    }
   },
   "reactions": [
-    { "on": "witness", "if": "event.name == \"Murder\"", "do": { "emotions.Dread": 0.8, "emotions.Anger": 0.5, "link": { "edge": "hates", "to": "other" } } },
-    { "on": "hears", "if": "event.name == \"Murder\" and event.known", "do": { "emotions.Dread": 0.5, "link": { "edge": "hates", "to": "other" } } },
-    { "on": "hears", "if": "event.name == \"Murder\" and not event.known", "do": { "emotions.Dread": 0.7 } },
-    { "on": "meets", "if": "rel.hates", "do": { "emotions.Dread": 0.3, "emotions.Anger": 0.3 } }
-  ]
+    {
+      "on": "witness",
+      "if": "event.name == \"Murder\"",
+      "do": {
+        "emotions.Dread": 0.8,
+        "emotions.Anger": 0.5,
+        "link": {
+          "edge": "hates",
+          "to": "other"
+        }
+      }
+    },
+    {
+      "on": "hears",
+      "if": "event.name == \"Murder\" and event.known",
+      "do": {
+        "emotions.Dread": 0.5,
+        "link": {
+          "edge": "hates",
+          "to": "other"
+        }
+      }
+    },
+    {
+      "on": "hears",
+      "if": "event.name == \"Murder\" and not event.known",
+      "do": {
+        "emotions.Dread": 0.7
+      }
+    },
+    {
+      "on": "meets",
+      "if": "rel.hates",
+      "do": {
+        "emotions.Dread": 0.3,
+        "emotions.Anger": 0.3
+      }
+    }
+  ],
+  "watch": {
+    "color": "#6b2d5c",
+    "tables": {
+      "People": {
+        "rows": "Person",
+        "columns": {
+          "Psychopathy": "traits.Psychopathy",
+          "Bloodlust": "needs.Bloodlust",
+          "Dread": "emotions.Dread",
+          "Hates": "links.hates"
+        },
+        "sort": "Psychopathy"
+      }
+    },
+    "logs": {
+      "Urges": {
+        "Stalking": {
+          "on": "started",
+          "if": "action == \"Murder\"",
+          "text": "{self.name} started stalking someone",
+          "global": true,
+          "emphasis": "strong"
+        },
+        "Hiding": {
+          "on": "started",
+          "if": "action == \"Hide\"",
+          "text": "{self.name} hid at home"
+        }
+      },
+      "Hatred": {
+        "Hates": {
+          "on": "linked",
+          "if": "edge == \"hates\"",
+          "text": "{self.name} came to hate {other.name}",
+          "global": true
+        },
+        "Let go": {
+          "on": "unlinked",
+          "if": "edge == \"hates\"",
+          "text": "{self.name} no longer hates {other.name}"
+        }
+      }
+    }
+  }
 }

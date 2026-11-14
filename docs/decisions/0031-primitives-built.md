@@ -1,7 +1,7 @@
 # 0031 — How ADR-0029 and ADR-0030 were built
 
 - Status: accepted (technical; designed by Claude, open to change)
-- Date: 2026-11-15
+- Date: 2026-11-14
 
 ## Decision
 
@@ -62,4 +62,4 @@
   test moved to a seed where they still occur.
 
 ## Discussion
-- 2026-11-15 — Built after the user asked for all primitives plus ADR-0030.
+- 2026-11-14 — Built after the user asked for all primitives plus ADR-0030.

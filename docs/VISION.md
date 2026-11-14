@@ -12,7 +12,9 @@ ruin has a recorded cause you can read back.
 **An engine, and a default pack.** The engine holds only what can't be said simply
 as data (pathfinding, time, perception, the pack interpreter, rendering). Everything
 the world *is* and *does* lives in packs, starting with our own default set
-([ADR-0027](decisions/0027-engine-and-default-pack.md)).
+([ADR-0027](decisions/0027-engine-and-default-pack.md)). Being an engine, it has to
+offer whoever writes packs every tool needed to model human behaviour
+([ADR-0035](decisions/0035-every-tool-for-behaviour.md)).
 
 ## What makes it different
 

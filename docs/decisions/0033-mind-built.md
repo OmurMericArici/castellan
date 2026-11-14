@@ -1,7 +1,7 @@
 # 0033 — The mind, built: planning over facts, emotions and scales, know-how, remembered events
 
 - Status: accepted (technical; designed by Claude from the user's decisions in ADR-0032, open to change)
-- Date: 2026-11-15
+- Date: 2026-11-14
 
 ## Context
 ADR-0032 set the direction (GOAP, learning by watching and talk, emotions as

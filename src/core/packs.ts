@@ -56,6 +56,16 @@ export interface ActionRule {
   readonly cost: number;
   /** Who knows the method: the chance to know it from birth, and to learn it by watching. */
   readonly knowhow: KnowHow;
+  /** How logs and stories put the method into words (ADR-0037). */
+  readonly words: Words;
+}
+
+/** A method in words: "gathering wood", "gathered wood", "(to) build a house", "(learned to) cut wood". */
+export interface Words {
+  readonly doing?: string;
+  readonly did?: string;
+  readonly purpose?: string;
+  readonly name?: string;
 }
 
 /** Methods are know-how (ADR-0032): known from birth by some, learned by watching or being taught. */
@@ -170,6 +180,51 @@ export const WHERE_SCOPE = [...MIND_SCOPE, "it"] as const;
 export const PERSON_WHERE_SCOPE = [...MIND_SCOPE, "it", "rel", "bond", "did"] as const;
 /** Reactions see the thing (`it`), the other person (`other`), relations and bonds to them, what they know the other did, the action and the event. */
 export const REACTION_SCOPE = [...MIND_SCOPE, "it", "other", "rel", "bond", "did", "action", "reason", "event", "method"] as const;
+/** What a pack log can be triggered by (ADR-0037). Lines are derived from the world's event log. */
+export const LOG_TRIGGERS = ["started", "happened", "witness", "hears", "met", "linked", "unlinked", "learned", "died", "created", "signal"] as const;
+export type LogTrigger = (typeof LOG_TRIGGERS)[number];
+/** Names a pack log's `if` and `text` may read. All of them always have a value. */
+export const LOG_SCOPE = ["self", "other", "about", "teller", "event", "action", "purpose", "edge", "method", "how", "by", "type", "signal", "rel", "words", "traits", "needs", "emotions"] as const;
+/** Table rows that are not people only see their own attributes. */
+export const ROW_SCOPE = ["self"] as const;
+export const EMPHASIS = ["strong", "normal", "quiet"] as const;
+export type Emphasis = (typeof EMPHASIS)[number];
+
+/** Text with expressions in braces: "{self.name} killed {about.name}". */
+export type TextPart = string | Compiled;
+
+/** "Track these": one row per node of a type, one column per expression. */
+export interface WatchTable {
+  readonly name: string;
+  readonly rows: string;
+  readonly where?: Compiled;
+  readonly columns: readonly { readonly name: string; readonly expr: Compiled }[];
+  /** Column to sort by, highest first. */
+  readonly sort?: string;
+}
+
+/** "This triggers this log": a log type inside a group. */
+export interface WatchLog {
+  readonly pack: string;
+  readonly group: string;
+  readonly name: string;
+  readonly on: LogTrigger;
+  readonly cond?: Compiled;
+  readonly text: readonly TextPart[];
+  /** The pack's suggestion for whether the line also shows in the world log. */
+  readonly global: boolean;
+  readonly emphasis: Emphasis;
+}
+
+/** A pack's own watchers and logs (ADR-0037). */
+export interface WatchDef {
+  readonly pack: string;
+  readonly color: string;
+  readonly mark?: string;
+  readonly tables: readonly WatchTable[];
+  readonly logs: readonly WatchLog[];
+}
+
 /** A `scales` expression reads the scaling type's own value. */
 export const SCALE_SCOPE = ["value"] as const;
 /** Fields of `plan` in mind expressions (the person's current build project). */
@@ -250,6 +305,8 @@ export interface TypeDef {
   readonly build?: BuildRule;
   readonly recognize?: RecognizeRule;
   readonly spread?: SpreadRule;
+  /** Entities: the word for several of them in logs and stories ("people"). */
+  readonly plural?: string;
   readonly attrs: ReadonlyMap<string, AttrDef>;
   readonly description?: string;
 }
@@ -282,6 +339,8 @@ export interface Registry {
   readonly facts: ReadonlyMap<string, FactDef>;
   /** Later packs override earlier ones for the same type. */
   readonly place: ReadonlyMap<string, PlaceDef>;
+  /** Watchers and logs by pack id (ADR-0037). */
+  readonly watch: ReadonlyMap<string, WatchDef>;
 }
 
 export interface PackError {
@@ -294,7 +353,7 @@ export interface PackError {
 
 export type CheckResult = { ok: true; registry: Registry } | { ok: false; errors: PackError[] };
 
-export const EMPTY_REGISTRY: Registry = { packs: [], types: new Map(), edges: new Map(), reactions: [], events: new Map(), facts: new Map(), place: new Map() };
+export const EMPTY_REGISTRY: Registry = { packs: [], types: new Map(), edges: new Map(), reactions: [], events: new Map(), facts: new Map(), place: new Map(), watch: new Map() };
 
 export function formatPackError(e: PackError): string {
   return e.path ? `${e.pack} › ${e.path}: ${e.message}` : `${e.pack}: ${e.message}`;
@@ -460,9 +519,10 @@ const MIND_KEYS: Record<MindRole, readonly string[]> = {
   need: ["start", "rate", "urgentAt", "scales"],
   emotion: ["start", "rate", "urgentAt", "scales"],
   goal: ["tier", "weight"],
-  action: ["steps", "serves", "requires", "gives", "restraint", "cost", "knowhow"],
+  action: ["steps", "serves", "requires", "gives", "restraint", "cost", "knowhow", "words"],
   trait: ["distribution", "scales"],
 };
+const WORD_KEYS = ["doing", "did", "purpose", "name"] as const;
 const ALL_MIND_KEYS: readonly string[] = [...new Set(Object.values(MIND_KEYS).flat())];
 /** What a `scales` key may point at. */
 const SCALE_TARGET = /^(restraint|(goal|action|restraint|need|emotion|trait)\.[A-Z][A-Za-z0-9]*)$/;
@@ -569,7 +629,19 @@ function checkMindRole(c: Checker, spec: Obj, p: string, role: MindRole): Pick<T
         if (innate && watch !== undefined) knowhow = { innate, watch };
       }
     }
-    return steps ? { action: { steps, serves, requires, gives, ...(restraint ? { restraint } : {}), cost, knowhow } } : {};
+    const words: { -readonly [K in keyof Words]: string } = {};
+    const rw = spec["words"];
+    if (rw !== undefined) {
+      if (!isObj(rw)) c.err(`${p}.words`, `must look like { "doing": "gathering wood", "did": "gathered wood", "purpose": "build a house", "name": "cut wood" }`);
+      else {
+        c.keys(rw, `${p}.words`, WORD_KEYS);
+        for (const k of WORD_KEYS) {
+          const v = c.optString(rw, k, `${p}.words`);
+          if (v !== undefined) words[k] = v;
+        }
+      }
+    }
+    return steps ? { action: { steps, serves, requires, gives, ...(restraint ? { restraint } : {}), cost, knowhow, words } } : {};
   }
   return {};
 }
@@ -656,6 +728,7 @@ interface PackParts {
   events: EventDef[];
   place: PlaceDef[];
   facts: FactDef[];
+  watch?: WatchDef;
 }
 
 function checkOne(raw: unknown, index: number): { parts?: PackParts; errors: PackError[] } {
@@ -663,7 +736,7 @@ function checkOne(raw: unknown, index: number): { parts?: PackParts; errors: Pac
   const idRaw = raw["pack"];
   const id = typeof idRaw === "string" ? idRaw : `(pack #${index + 1})`;
   const c = new Checker(id);
-  c.keys(raw, "", ["pack", "version", "description", "requires", "types", "extends", "edges", "reactions", "events", "place", "facts"]);
+  c.keys(raw, "", ["pack", "version", "description", "requires", "types", "extends", "edges", "reactions", "events", "place", "facts", "watch"]);
 
   if (typeof idRaw !== "string" || !PACK_ID.test(idRaw)) {
     c.err("pack", `the pack id must be lowercase letters, digits and dashes, starting with a letter (e.g. "firearms")`);
@@ -693,7 +766,7 @@ function checkOne(raw: unknown, index: number): { parts?: PackParts; errors: Pac
       continue;
     }
     if ("do" in spec) c.err(`${p}.do`, `"do" was replaced by "steps" in format 0.4 (see PACKS.md, "Steps")`);
-    c.keys(spec, p, ["kind", "leaf", "memorable", "remember", "memory", "role", "attrs", "description", "do", ...ALL_MIND_KEYS, ...ENTITY_RULE_KEYS]);
+    c.keys(spec, p, ["kind", "leaf", "memorable", "remember", "memory", "role", "attrs", "description", "plural", "do", ...ALL_MIND_KEYS, ...ENTITY_RULE_KEYS]);
     const kind = spec["kind"];
     if (typeof kind !== "string" || !KINDS.includes(kind as NodeKind)) {
       c.err(`${p}.kind`, `must be one of ${KINDS.join(", ")}`);
@@ -750,6 +823,8 @@ function checkOne(raw: unknown, index: number): { parts?: PackParts; errors: Pac
       else memory = checkMemory(c, spec["memory"], `${p}.memory`);
     }
     const description = c.optString(spec, "description", p);
+    const plural = c.optString(spec, "plural", p);
+    if (plural !== undefined && kind !== "entity") c.err(`${p}.plural`, `only entity types have "plural"`);
     types.push({
       name,
       kind: kind as NodeKind,
@@ -763,6 +838,7 @@ function checkOne(raw: unknown, index: number): { parts?: PackParts; errors: Pac
       ...(mindRole ? { role: mindRole } : {}),
       attrs: checkAttrs(c, spec["attrs"], `${p}.attrs`),
       ...(description ? { description } : {}),
+      ...(plural ? { plural } : {}),
     });
   }
 
@@ -870,8 +946,163 @@ function checkOne(raw: unknown, index: number): { parts?: PackParts; errors: Pac
     if (expr) facts.push({ name, pack: id, expr });
   }
 
+  const watch = raw["watch"] === undefined ? undefined : checkWatch(c, raw["watch"], id);
+
   if (c.errors.length) return { errors: c.errors };
-  return { parts: { id, version: version as string, requires, types, edges, reactions, events, place, facts }, errors: [] };
+  return { parts: { id, version: version as string, requires, types, edges, reactions, events, place, facts, ...(watch ? { watch } : {}) }, errors: [] };
+}
+
+// ------------------------------------------------------------------ watchers and logs (ADR-0037)
+
+const COLOR = /^#[0-9a-fA-F]{6}$/;
+const LABEL = /^[A-Za-z][A-Za-z0-9 ]{0,29}$/;
+
+/** "{self.name} killed {about.name}" → text and compiled expressions, in order. */
+function checkText(c: Checker, raw: unknown, path: string, scope: readonly string[]): TextPart[] | undefined {
+  if (typeof raw !== "string" || raw.trim() === "") {
+    c.err(path, `must be a line of text; expressions go in braces: "{self.name} killed {about.name}"`);
+    return undefined;
+  }
+  const parts: TextPart[] = [];
+  let ok = true;
+  let i = 0;
+  while (i < raw.length) {
+    const open = raw.indexOf("{", i);
+    if (open < 0) {
+      parts.push(raw.slice(i));
+      break;
+    }
+    if (open > i) parts.push(raw.slice(i, open));
+    const close = raw.indexOf("}", open);
+    if (close < 0) {
+      c.err(path, `a "{" is never closed`);
+      return undefined;
+    }
+    try {
+      parts.push(compile(raw.slice(open + 1, close), scope));
+    } catch (e) {
+      c.err(path, `in {${raw.slice(open + 1, close)}}: ${e instanceof ExprError ? e.message : String(e)}`);
+      ok = false;
+    }
+    i = close + 1;
+  }
+  return ok ? parts : undefined;
+}
+
+function checkWatch(c: Checker, raw: unknown, pack: string): WatchDef | undefined {
+  const p = "watch";
+  if (!isObj(raw)) {
+    c.err(p, `must look like { "color": "#a23b3b", "tables": { ... }, "logs": { ... } }`);
+    return undefined;
+  }
+  c.keys(raw, p, ["color", "mark", "tables", "logs"]);
+  const color = raw["color"] ?? "#888888";
+  if (typeof color !== "string" || !COLOR.test(color)) c.err(`${p}.color`, `must be a colour like "#a23b3b"`);
+  const mark = c.optString(raw, "mark", p);
+  if (mark !== undefined && [...mark].length > 2) c.err(`${p}.mark`, "must be one or two characters");
+
+  const tables: WatchTable[] = [];
+  const rawTables = raw["tables"];
+  if (rawTables !== undefined && !isObj(rawTables)) c.err(`${p}.tables`, "must be an object of tables, by name");
+  for (const [name, spec] of Object.entries(isObj(rawTables) ? rawTables : {})) {
+    const tp = `${p}.tables.${name}`;
+    if (!LABEL.test(name)) c.err(tp, "table names are letters, digits and spaces, starting with a letter");
+    if (!isObj(spec)) {
+      c.err(tp, `must look like { "rows": "Person", "columns": { "Hunger": "needs.Hunger" } }`);
+      continue;
+    }
+    c.keys(spec, tp, ["rows", "where", "columns", "sort"]);
+    const rows = spec["rows"];
+    if (typeof rows !== "string" || !TYPE_NAME.test(rows)) {
+      c.err(`${tp}.rows`, `must be an entity type name, e.g. "Person"`);
+      continue;
+    }
+    // People are seen through their mind; anything else only has its own attributes.
+    const scope: readonly string[] = rows === "Person" ? MIND_SCOPE : ROW_SCOPE;
+    const where = spec["where"] === undefined ? undefined : condition(c, spec["where"], `${tp}.where`, scope);
+    const columns: { name: string; expr: Compiled }[] = [];
+    const rawCols = spec["columns"];
+    if (!isObj(rawCols) || Object.keys(rawCols).length === 0) c.err(`${tp}.columns`, `must look like { "Hunger": "needs.Hunger" }, with at least one column`);
+    for (const [col, src] of Object.entries(isObj(rawCols) ? rawCols : {})) {
+      if (!LABEL.test(col)) c.err(`${tp}.columns.${col}`, "column names are letters, digits and spaces, starting with a letter");
+      const expr = condition(c, src, `${tp}.columns.${col}`, scope);
+      if (expr) columns.push({ name: col, expr });
+    }
+    const sort = c.optString(spec, "sort", tp);
+    if (sort !== undefined && isObj(rawCols) && !(sort in rawCols)) c.err(`${tp}.sort`, `"${sort}" is not one of this table's columns${suggest(sort, Object.keys(rawCols))}`);
+    tables.push({ name, rows, ...(where ? { where } : {}), columns, ...(sort !== undefined ? { sort } : {}) });
+  }
+
+  const logs: WatchLog[] = [];
+  const rawLogs = raw["logs"];
+  if (rawLogs !== undefined && !isObj(rawLogs)) c.err(`${p}.logs`, "must be an object of groups, each an object of log types");
+  for (const [group, types] of Object.entries(isObj(rawLogs) ? rawLogs : {})) {
+    const gp = `${p}.logs.${group}`;
+    if (!LABEL.test(group)) c.err(gp, "group names are letters, digits and spaces, starting with a letter");
+    if (!isObj(types)) {
+      c.err(gp, `a group holds log types: { "Killing": { "on": "happened", "text": "..." } }`);
+      continue;
+    }
+    for (const [name, spec] of Object.entries(types)) {
+      const lp = `${gp}.${name}`;
+      if (!LABEL.test(name)) c.err(lp, "log type names are letters, digits and spaces, starting with a letter");
+      if (!isObj(spec)) {
+        c.err(lp, `must look like { "on": "happened", "text": "{self.name} killed {about.name}" }`);
+        continue;
+      }
+      c.keys(spec, lp, ["on", "if", "text", "global", "emphasis"]);
+      const on = spec["on"];
+      if (typeof on !== "string" || !(LOG_TRIGGERS as readonly string[]).includes(on)) {
+        c.err(`${lp}.on`, `must be one of ${LOG_TRIGGERS.join(", ")}${typeof on === "string" ? suggest(on, LOG_TRIGGERS) : ""}`);
+        continue;
+      }
+      const cond = spec["if"] === undefined ? undefined : condition(c, spec["if"], `${lp}.if`, LOG_SCOPE);
+      const text = checkText(c, spec["text"], `${lp}.text`, LOG_SCOPE);
+      const global = spec["global"] ?? false;
+      if (typeof global !== "boolean") c.err(`${lp}.global`, "must be true or false");
+      const emphasis = spec["emphasis"] ?? "normal";
+      if (typeof emphasis !== "string" || !(EMPHASIS as readonly string[]).includes(emphasis)) c.err(`${lp}.emphasis`, `must be one of ${EMPHASIS.join(", ")}`);
+      if (text) logs.push({ pack, group, name, on: on as LogTrigger, ...(cond ? { cond } : {}), text, global: global === true, emphasis: emphasis as Emphasis });
+    }
+  }
+  return { pack, color: color as string, ...(mark !== undefined ? { mark } : {}), tables, logs };
+}
+
+/** Names that watch expressions read must exist across all loaded packs. */
+function crossCheckWatch(watch: ReadonlyMap<string, WatchDef>, types: ReadonlyMap<string, TypeDef>, edges: ReadonlyMap<string, EdgeTypeDef>): PackError[] {
+  const errors: PackError[] = [];
+  const all = [...types.values()];
+  const names = (pred: (t: TypeDef) => boolean) => all.filter(pred).map((t) => t.name);
+  const lists: Record<string, { what: string; names: string[] }> = {
+    traits: { what: "trait type", names: names((t) => t.role === "trait") },
+    needs: { what: "need type", names: names((t) => t.role === "need") },
+    emotions: { what: "emotion type", names: names((t) => t.role === "emotion") },
+    knows: { what: "memorable entity type", names: names((t) => t.memorable) },
+    links: { what: "edge type", names: [...edges.keys()] },
+    rel: { what: "edge type", names: [...edges.keys()] },
+  };
+  const check = (pack: string, path: string, expr: Compiled) => {
+    for (const read of expr.paths) {
+      const [root, name = ""] = read.split(".");
+      const list = lists[root!];
+      if (list && !list.names.includes(name)) errors.push({ pack, path, message: `"${read}": "${name}" is not a ${list.what}${suggest(name, list.names)}` });
+    }
+  };
+  for (const w of watch.values()) {
+    for (const t of w.tables) {
+      const tp = `watch.tables.${t.name}`;
+      const rows = types.get(t.rows);
+      if (!rows || rows.kind !== "entity") errors.push({ pack: w.pack, path: `${tp}.rows`, message: `"${t.rows}" is not an entity type${suggest(t.rows, names((x) => x.kind === "entity"))}` });
+      if (t.where) check(w.pack, `${tp}.where`, t.where);
+      for (const col of t.columns) check(w.pack, `${tp}.columns.${col.name}`, col.expr);
+    }
+    for (const l of w.logs) {
+      const lp = `watch.logs.${l.group}.${l.name}`;
+      if (l.cond) check(w.pack, `${lp}.if`, l.cond);
+      for (const part of l.text) if (typeof part !== "string") check(w.pack, `${lp}.text`, part);
+    }
+  }
+  return errors;
 }
 
 /**
@@ -975,10 +1206,12 @@ function checkOrdered(sources: readonly unknown[]): CheckResult {
     if (!t || t.kind !== "entity" || !t.leaf) errors.push({ pack: pl.pack, path: `place.${pl.type}`, message: `"${pl.type}" is not a leaf entity type; only leaves can be placed${suggest(pl.type, [...types.values()].filter((x) => x.leaf).map((x) => x.name))}` });
   }
   if (errors.length) return { ok: false, errors };
-  errors.push(...crossCheckMind(types), ...crossCheckEntityRules(types, edges), ...crossCheckBehaviour(types, edges, reactions, events), ...crossCheckPlanning(types, edges, facts));
+  const watch = new Map<string, WatchDef>();
+  for (const p of ordered) if (p.watch) watch.set(p.id, p.watch);
+  errors.push(...crossCheckMind(types), ...crossCheckEntityRules(types, edges), ...crossCheckBehaviour(types, edges, reactions, events), ...crossCheckPlanning(types, edges, facts), ...crossCheckWatch(watch, types, edges));
   if (errors.length) return { ok: false, errors };
 
-  return { ok: true, registry: { packs: ordered.map((p) => ({ id: p.id, version: p.version })), types, edges, reactions, events, facts, place } };
+  return { ok: true, registry: { packs: ordered.map((p) => ({ id: p.id, version: p.version })), types, edges, reactions, events, facts, place, watch } };
 }
 
 /** Names used inside mind expressions and `serves` must exist across all loaded packs. */

@@ -1,6 +1,6 @@
 {
   "pack": "hostility",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Grudges and anger. Finding something you remembered emptied by someone else leaves a grudge; meeting them makes you angry; anger is vented by confronting them. Killing is held back by strong restraint, but anger and fear wear it down: a very angry, very afraid person may kill.",
   "requires": [
     "core"
@@ -45,6 +45,12 @@
       ],
       "serves": {
         "Vent": "if(emotions.Anger > 0.4, 1.2, 0)"
+      },
+      "words": {
+        "doing": "confronting someone",
+        "did": "confronted someone",
+        "purpose": "confront someone",
+        "name": "confront people"
       }
     },
     "Attack": {
@@ -74,6 +80,12 @@
       ],
       "serves": {
         "Vent": "clamp((emotions.Anger - 0.6) * 2.5, 0, 1) * clamp(emotions.Fear * 2 - 0.6, 0, 1) * 3"
+      },
+      "words": {
+        "doing": "going after someone",
+        "did": "went after someone",
+        "purpose": "attack someone",
+        "name": "kill in anger"
       }
     }
   },
@@ -143,5 +155,74 @@
       },
       "description": "Meeting someone they know has killed."
     }
-  ]
+  ],
+  "watch": {
+    "color": "#c8452f",
+    "tables": {
+      "Tempers": {
+        "rows": "Person",
+        "columns": {
+          "Anger": "emotions.Anger",
+          "Fear": "emotions.Fear",
+          "Grudges": "links.grudge",
+          "Killings known": "reports.Murder"
+        },
+        "sort": "Anger"
+      }
+    },
+    "logs": {
+      "Grudges": {
+        "New grudge": {
+          "on": "linked",
+          "if": "edge == \"grudge\"",
+          "text": "{self.name} now holds a grudge against {other.name}",
+          "global": true
+        },
+        "Ran into": {
+          "on": "met",
+          "if": "rel.grudge",
+          "text": "{self.name} ran into {other.name} and got angry"
+        },
+        "Confrontation": {
+          "on": "started",
+          "if": "action == \"Confront\"",
+          "text": "{self.name} set out to confront someone"
+        }
+      },
+      "Violence": {
+        "Attack": {
+          "on": "started",
+          "if": "action == \"Attack\"",
+          "text": "{self.name} went after someone in anger",
+          "global": true,
+          "emphasis": "strong"
+        },
+        "Killing": {
+          "on": "happened",
+          "if": "event.name == \"Murder\"",
+          "text": "{self.name} killed {about.name}; seen by {event.seenBy}",
+          "global": true,
+          "emphasis": "strong"
+        },
+        "Witness": {
+          "on": "witness",
+          "if": "event.name == \"Murder\"",
+          "text": "{self.name} saw {other.name} kill {about.name}"
+        }
+      },
+      "News": {
+        "Told": {
+          "on": "hears",
+          "if": "event.name == \"Murder\" and event.told",
+          "text": "{teller.name} told {self.name} that {other.name} killed {about.name}"
+        },
+        "Heard": {
+          "on": "hears",
+          "if": "event.name == \"Murder\" and not event.told",
+          "text": "{self.name} heard that {other.name} killed {about.name}",
+          "emphasis": "quiet"
+        }
+      }
+    }
+  }
 }

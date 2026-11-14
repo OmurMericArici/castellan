@@ -1,6 +1,6 @@
 {
   "pack": "hunger",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "People get hungry. They remember berry bushes and forage from them; when they know none, finding one becomes the problem to solve. Bushes spread on fertile land.",
   "requires": [
     "core"
@@ -31,7 +31,8 @@
         "count": 4,
         "radius": 3,
         "field": "fertility"
-      }
+      },
+      "plural": "bushes"
     },
     "Hunger": {
       "kind": "mind",
@@ -76,6 +77,12 @@
       ],
       "serves": {
         "Eat": "if(needs.Hunger > 0.3, 1, 0)"
+      },
+      "words": {
+        "doing": "foraging",
+        "did": "foraged",
+        "purpose": "find food",
+        "name": "forage"
       }
     }
   },
@@ -85,6 +92,42 @@
       "prefer": "fertility",
       "avoid": {
         "water": 0.05
+      }
+    }
+  },
+  "watch": {
+    "color": "#8e3b6a",
+    "tables": {
+      "Hunger": {
+        "rows": "Person",
+        "columns": {
+          "Hunger": "needs.Hunger",
+          "Bushes known": "knows.Bush"
+        },
+        "sort": "Hunger"
+      },
+      "Bushes": {
+        "rows": "Bush",
+        "where": "self.food < 3",
+        "columns": {
+          "Food left": "self.food"
+        }
+      }
+    },
+    "logs": {
+      "Food": {
+        "Foraging": {
+          "on": "started",
+          "if": "action == \"Forage\"",
+          "text": "{self.name} went to forage",
+          "emphasis": "quiet"
+        },
+        "Searching": {
+          "on": "started",
+          "if": "purpose == \"Forage\"",
+          "text": "{self.name} knows no bush with food and went looking",
+          "emphasis": "quiet"
+        }
       }
     }
   }

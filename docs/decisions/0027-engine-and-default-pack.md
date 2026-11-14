@@ -1,7 +1,7 @@
 # 0027 — We are building an engine; the world is its default pack
 
 - Status: accepted (design principle)
-- Date: 2026-11-15
+- Date: 2026-11-14
 
 ## Context
 While checking whether hunger, hostility and imperfect memory could be added as
@@ -32,6 +32,6 @@ packs (ADR-0026), the user stated what Castellan actually is.
   any), then which pack uses it.
 
 ## Discussion
-- 2026-11-15 — User: add this as a design principle: we are actually developing
+- 2026-11-14 — User: add this as a design principle: we are actually developing
   an engine; our aim is to make a default pack; so systems we can't express
   simply are done in code, everything else in packs.

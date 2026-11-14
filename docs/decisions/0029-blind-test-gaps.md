@@ -1,7 +1,7 @@
 # 0029 — Blind pack test: results and the missing primitives
 
 - Status: accepted (all nine built before v0.1)
-- Date: 2026-11-15
+- Date: 2026-11-14
 
 ## Context
 To check ADR-0026's claim, three fresh agents with no knowledge of the engine or
@@ -56,7 +56,7 @@ Ordered by how many tests hit them and how general they are.
   longer "helps Survive" by day. Correct by the rules, odd to read in the panel.
 
 ## Discussion
-- 2026-11-15 — User asked for the blind test with sub-agents: food storage, drinking
+- 2026-11-14 — User asked for the blind test with sub-agents: food storage, drinking
   water if the engine allows it, joking friendship if it allows it; three packs in
   total either way.
-- 2026-11-15 — User: solve all of them now (ADR-0030).
+- 2026-11-14 — User: solve all of them now (ADR-0030).

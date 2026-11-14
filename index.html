@@ -9,7 +9,7 @@
   <body>
     <header>
       <h1>Castellan</h1>
-      <p>A node-based world builder. Everything people do comes from packs: they explore, forage, build houses that become named villages, hold grudges, remember imperfectly, and, rarely, one of them kills. Click a person to follow them; change the packs at the bottom.</p>
+      <p>A node-based world builder. Everything people do comes from packs: they explore, forage, build houses that become named villages, hold grudges, remember imperfectly, and, rarely, one of them kills. Click a person to follow them; open a pack to watch what it tracks and logs; change the packs at the bottom.</p>
     </header>
     <main>
       <div class="controls">
@@ -42,6 +42,16 @@
         <span class="ring"></span> known to the selected person
       </p>
       <section id="person" aria-live="polite"></section>
+      <section id="world-log">
+        <h2>World log</h2>
+        <p class="hint">Lines from every pack, in the pack's colour. Which kinds show here is chosen in each pack below.</p>
+        <ol id="global-log" class="log"></ol>
+      </section>
+      <section id="watch">
+        <h2>Watch a pack</h2>
+        <p class="hint">Each pack says what to track and what to log. Open one to see its tables and its own log; click a person's row to follow them.</p>
+        <div id="watch-list"></div>
+      </section>
       <details id="pack-manager">
         <summary>Packs: turn them on or off, change their order</summary>
         <p class="hint">Packs load top to bottom; when two packs change the same thing, the lower one wins. A pack always loads after the packs it requires.</p>

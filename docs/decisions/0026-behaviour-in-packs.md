@@ -1,7 +1,7 @@
 # 0026 — Behaviour in packs: steps, reactions, memory rules
 
 - Status: accepted
-- Date: 2026-11-15
+- Date: 2026-11-14
 
 ## Context
 The user asked whether three parked mechanics (hunger and food, anger and
@@ -78,9 +78,9 @@ the guide, the way a user or an LLM would.
 3. `meets` is included, so the hostility pack is part of the proof.
 
 ## Discussion
-- 2026-11-15 — User: can these new mechanics be added as packs now that everything
+- 2026-11-14 — User: can these new mechanics be added as packs now that everything
   is node based? If we can't, people can't add them either, so include behaviour
   definition.
-- 2026-11-15 — User stated the engine/default-pack principle (ADR-0027), which this record
+- 2026-11-14 — User stated the engine/default-pack principle (ADR-0027), which this record
   applies: Adam's hard-coded verbs and memory are debt against it. Scope questions still open.
-- 2026-11-15 — User: yes to both (M5 before v0.1, `meets` included). Accepted.
+- 2026-11-14 — User: yes to both (M5 before v0.1, `meets` included). Accepted.

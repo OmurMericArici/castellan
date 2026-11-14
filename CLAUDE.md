@@ -21,10 +21,12 @@ Read `docs/SCOPE.md` (current milestone) and the latest `docs/DEVLOG.md` entry f
 - `npm run build` — typecheck + production build to `dist/`
 - `npm run check-pack -- file.json` — Archie + 10-day simulation for a pack (`--help`)
 
-## Engine or pack? (ADR-0027)
+## Engine or pack? (ADR-0027, ADR-0035)
 Castellan is an engine; our content is its default pack. Before writing engine code for a
 mechanic, ask whether it can be a pack. If not, add the smallest **general** primitive that
 makes it possible, then write the mechanic as a pack. Never hard-code a mechanic.
+The engine must offer pack authors every tool needed to model human behaviour: a
+behaviour that can't be written as a pack is a gap in the engine.
 
 ## Code rules
 - Use the glossary terms from `docs/VISION.md` in names and comments.

@@ -1,6 +1,6 @@
 {
   "pack": "shelter",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "People need shelter: Molly plans houses where need, wood and land line up; people gather wood and build them; houses close together become a village.",
   "requires": [
     "core"
@@ -55,6 +55,12 @@
       "knowhow": {
         "innate": 0.8,
         "watch": 0.4
+      },
+      "words": {
+        "doing": "gathering wood",
+        "did": "gathered wood",
+        "purpose": "get wood",
+        "name": "cut wood"
       }
     },
     "Deliver": {
@@ -78,7 +84,13 @@
       ],
       "gives": [
         "siteReady"
-      ]
+      ],
+      "words": {
+        "doing": "carrying wood to the site",
+        "did": "carried wood to the site",
+        "purpose": "get the site ready",
+        "name": "carry wood"
+      }
     },
     "Build": {
       "kind": "mind",
@@ -105,6 +117,12 @@
       "knowhow": {
         "innate": 0.7,
         "watch": 0.5
+      },
+      "words": {
+        "doing": "building",
+        "did": "built",
+        "purpose": "build a house",
+        "name": "build a house"
       }
     },
     "House": {
@@ -189,5 +207,58 @@
   "facts": {
     "hasLoad": "self.carrying > 0 and (self.carrying >= 4 or self.carrying >= plan.missing)",
     "siteReady": "plan.ready"
+  },
+  "watch": {
+    "color": "#a06432",
+    "tables": {
+      "Builders": {
+        "rows": "Person",
+        "columns": {
+          "Shelter need": "needs.Shelter",
+          "Has a home": "home",
+          "Building": "plan.active",
+          "Wood missing": "plan.missing",
+          "Carrying": "self.carrying"
+        },
+        "sort": "Shelter need"
+      },
+      "Houses": {
+        "rows": "House",
+        "columns": {
+          "State": "self.state",
+          "Wood at site": "self.stock",
+          "Condition": "self.condition"
+        }
+      }
+    },
+    "logs": {
+      "Building": {
+        "Spot marked": {
+          "on": "linked",
+          "if": "edge == \"builds\" and by == \"molly\"",
+          "text": "Molly marked a spot for {self.name}'s house"
+        },
+        "Moved in": {
+          "on": "linked",
+          "if": "edge == \"livesIn\"",
+          "text": "{self.name} finished a house and moved in",
+          "global": true
+        }
+      },
+      "Villages": {
+        "Formed": {
+          "on": "created",
+          "if": "type == \"Village\"",
+          "text": "A village formed: {self.name}",
+          "global": true,
+          "emphasis": "strong"
+        },
+        "House joined": {
+          "on": "linked",
+          "if": "edge == \"memberOf\"",
+          "text": "A house became part of {other.name}"
+        }
+      }
+    }
   }
 }

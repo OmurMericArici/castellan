@@ -28,6 +28,9 @@ A world = Noah's configuration + seed + loaded packs.
    can't be expressed simply as data; everything else is a pack, including our
    own content. A mechanic that can't be written as a pack reveals a missing
    general primitive. ([ADR-0027](decisions/0027-engine-and-default-pack.md))
+   Being an engine, it must offer the pack author **every tool needed to model
+   human behaviour**; a behaviour that can't be modelled is a gap in the engine.
+   ([ADR-0035](decisions/0035-every-tool-for-behaviour.md))
 
 1. **The space is the root.** Everything lives in a space carrying **fields**
    (height, water, fertility, soil, temperature, …). Fields are continuous
@@ -98,7 +101,7 @@ Three mechanisms, none of them "place it":
 | Mechanism | Driven by | Example |
 |---|---|---|
 | **Action** | a person meeting a need | needy person + material + buildable spot → Molly places a house **concept** → the person **works** to turn it into a `House` → `Person ─livesIn→ House` satisfies shelter |
-| **Aggregation** | fuzzy clustering | houses close together on fitting land → `Village` |
+| **Aggregation** | ties between members | houses whose people are tied to each other → `Village` |
 | **Composition** | the derived node itself | a new `House` gets its walls, windows, floor laid out WFC-style |
 
 ### Action: the fuzzy triple
@@ -116,8 +119,13 @@ Three mechanisms, none of them "place it":
 
 ### Aggregation
 
+A group is an entity plus the things that belong to it. It has no radius or
+border; its place and extent are derived from its members. Belonging comes from
+ties in the graph, not from distance ([ADR-0036](decisions/0036-village-is-its-members.md);
+the code still uses a radius until that is built).
+
 ```
-μ_village = AND( many(houses), close(density), suitable(fields) )
+μ_village = AND( many(houses), tied(their people) )
 ```
 
 Forming needs a higher μ than dissolving (hysteresis).
@@ -146,3 +154,6 @@ direction (principles 12–13).
 6. **Happiness, concretely.** Relative — to what? (Undecided; not needed for the first slice.)
 8. **Material fate.** Not deleted; transformation keeps identity. Memory cost → [ADR-0014](decisions/0014-identity-and-memory.md).
 15. **One Molly or several parts behind one face?** (ADR-0013)
+16. **What ties make a village?** Knowing each other, talk, kinship, a shared resource; do people join or only houses? (ADR-0036)
+17. **Behaviour primitives**: association, the `claim` effect, writable fields, unknowns in the planner, new names; their open points and timing. (ADR-0034)
+18. ~~**Pack watchers and logs**: inside M6 or after; derived or stored lines.~~ Inside M6, derived lines (ADR-0037, built).

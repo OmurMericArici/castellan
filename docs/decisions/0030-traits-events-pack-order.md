@@ -1,7 +1,7 @@
 # 0030 — Traits with distributions, world events, death, pack order and overrides
 
 - Status: accepted
-- Date: 2026-11-15
+- Date: 2026-11-14
 
 ## Context
 After the blind test (ADR-0029) the user decided to build all nine missing
@@ -32,7 +32,7 @@ the example of what a pack author must be able to do.
   *in the same order* = same world.
 
 ## Discussion
-- 2026-11-15 — User: solve all of them now. Also: I want to add a personality trait,
+- 2026-11-14 — User: solve all of them now. Also: I want to add a personality trait,
   e.g. psychopathy, as a need (the wish to kill). I must be able to set how it is
   distributed in society, via a generating function or histogram-like data. Adam
   should handle this. Then an event called murder: Molly notices it, people get

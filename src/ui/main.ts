@@ -1,9 +1,10 @@
-import { clockLabel, createSimulation, createWorld, DEFAULT_ADAM, genesis, isNight, loadPacks, withPackPlacement } from "../core";
+import { clockLabel, createSimulation, createWorld, DEFAULT_ADAM, genesis, isNight, loadPacks, Watcher, withPackPlacement } from "../core";
 import type { NodeId } from "../core";
 import { DEFAULT_NOAH } from "./noah-default";
 import { AVAILABLE, DEFAULT_ORDER, packOrderFromUrl, sourcesFor } from "./packs";
 import { drawWorld, renderSpace } from "./render";
-import { PURPOSE, StoryBook } from "./story";
+import { StoryBook } from "./story";
+import { WatchPanel } from "./watch";
 
 const SCALE = 6;
 
@@ -46,6 +47,7 @@ const sim = createSimulation(world);
 sim.start();
 const space = world.space!;
 const story = new StoryBook();
+const watcher = new Watcher(world, sim.adam);
 
 function go(next: { seed?: number; packs?: string[] }): void {
   const q = new URLSearchParams();
@@ -125,26 +127,14 @@ canvas.addEventListener("click", (ev) => {
 
 // ---------------------------------------------------------------- person panel
 
-const LABEL: Record<string, string> = {
-  Explore: "exploring",
-  Wander: "wandering",
-  Rest: "resting",
-  Gather: "gathering wood",
-  Deliver: "carrying wood to the site",
-  Build: "building",
-  Forage: "foraging",
-  Confront: "confronting someone",
-  Attack: "going after someone",
-  Chat: "chatting",
-  Hide: "hiding at home",
-  Murder: "stalking someone",
-};
+/** How a method reads, in the words its pack gave it (ADR-0037). */
+const wordsOf = (method: string) => world.registry.types.get(method)?.action?.words ?? {};
 
 const nameOf = (id: NodeId | undefined) => (id === undefined ? "someone" : String(world.graph.node(id)?.attrs["name"] ?? "someone"));
 const linksOf = (id: NodeId, edge: string) =>
   world.graph
     .edgesOf(id, edge)
-    .filter((e) => e.from === id)
+    .filter((e) => e.from === id && world.graph.node(e.to)?.type === "Person")
     .map((e) => nameOf(e.to));
 
 function renderPanel(): void {
@@ -164,8 +154,8 @@ function renderPanel(): void {
   const methods = Object.entries(sim.adam.methods(selected))
     .map(([m, pref]) => (pref === 1 ? m : `${m} ${pref.toFixed(2)}`))
     .join(", ");
-  const doingText = doing ? `${LABEL[doing] ?? doing}${activity?.for ? ` to ${PURPOSE[activity.for] ?? activity.for.toLowerCase()}` : ""}` : "—";
-  const lines = story.lines(selected).map((l) => `<li>${l}</li>`).join("");
+  const doingText = doing ? `${wordsOf(doing).doing ?? doing.toLowerCase()}${activity?.for ? ` to ${wordsOf(activity.for).purpose ?? activity.for.toLowerCase()}` : ""}` : "—";
+  const lines = story.lines(world, watcher, selected).map((l) => `<li>${l}</li>`).join("");
   const home = world.graph.edgesOf(selected, "livesIn").find((e) => e.from === selected);
   const village = home ? world.graph.edgesOf(home.to, "memberOf").map((e) => world.graph.node(e.to))[0] : undefined;
   const plan = world.graph.edgesOf(selected, "builds").map((e) => world.graph.node(e.to)).find((n) => n?.attrs["state"] === "planned");
@@ -175,11 +165,13 @@ function renderPanel(): void {
     : plan
       ? `building a house: ${String(plan.attrs["stock"])}/10 wood at the site${carrying ? `, carrying ${carrying}` : ""}`
       : "no home yet";
-  const relations = [
-    ...linksOf(selected, "grudge").map((n) => `holds a grudge against ${n}`),
-    ...linksOf(selected, "hates").map((n) => `hates ${n}`),
-    ...linksOf(selected, "friend").map((n) => `friends with ${n}`),
-  ];
+  // Every kind of link to another person, whatever packs define them.
+  const who = selected;
+  const relations = [...world.registry.edges.values()]
+    .filter((e) => e.from === "entity" && e.to === "entity")
+    .map((e) => ({ edge: e.name, names: linksOf(who, e.name) }))
+    .filter((r) => r.names.length)
+    .map((r) => `${r.edge}: ${r.names.join(", ")}`);
   const death = world.log.find((l) => l.event.kind === "died" && l.event.id === selected);
   const status = dead && death?.event.kind === "died" ? `<p class="error">Died ${clockLabel(death.t)}${death.event.by !== undefined ? `, killed by ${nameOf(death.event.by)}` : ""}.</p>` : "";
   panel.innerHTML = `
@@ -192,6 +184,12 @@ function renderPanel(): void {
     <ol class="story">${lines}</ol>`;
 }
 
+// ---------------------------------------------------------------- pack watchers and logs (ADR-0037)
+
+const watchPanel = new WatchPanel(world, watcher, $<HTMLElement>("#watch-list"), $<HTMLOListElement>("#global-log"), (id) => {
+  if (world.graph.node(id)?.type === "Person") selected = id;
+});
+
 // ---------------------------------------------------------------- loop
 
 let last = performance.now();
@@ -202,6 +200,7 @@ function frame(now: number): void {
   last = now;
   if (daysPerSecond > 0) sim.run(world.time + dt * daysPerSecond);
   story.update(world);
+  watcher.update();
   drawWorld(ctx!, sim, base, {
     scale: SCALE,
     ...(selected !== undefined ? { selected } : {}),
@@ -210,6 +209,7 @@ function frame(now: number): void {
   clock.textContent = clockLabel(world.time);
   if (now - lastPanel > 200) {
     renderPanel();
+    watchPanel.render();
     const houses = [...world.graph.nodes({ type: "House" })];
     const builtCount = houses.filter((h) => h.attrs["state"] === "built").length;
     const villages = [...world.graph.nodes({ type: "Village" })].map((v) => String(v.attrs["name"]));
@@ -218,8 +218,9 @@ function frame(now: number): void {
       `${sim.adam.people().length} people alive${deaths ? `, ${deaths} dead` : ""} · ${builtCount} houses built, ${houses.length - builtCount} being built` +
       (villages.length ? ` · villages: ${villages.join(", ")}` : "") +
       ` · ${world.log.length} events`;
-    warningsBox.hidden = sim.adam.warnings.length === 0;
-    warningsBox.textContent = sim.adam.warnings.length ? `Pack rules that failed and were skipped:\n${sim.adam.warnings.join("\n")}` : "";
+    const warnings = [...sim.adam.warnings, ...watcher.warnings];
+    warningsBox.hidden = warnings.length === 0;
+    warningsBox.textContent = warnings.length ? `Pack rules that failed and were skipped:\n${warnings.join("\n")}` : "";
     lastPanel = now;
   }
   requestAnimationFrame(frame);

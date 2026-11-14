@@ -10,7 +10,7 @@ This page is the whole contract, written so a person *or an LLM* can write a
 valid pack from it. Archie checks every pack before it loads and explains each
 problem with its exact place, so a failed pack can be fixed from the error alone.
 
-Format version: **0.6**: adds planning over facts (`facts`, `requires`, `gives`), emotions, `scales`, `restraint`, know-how (`knowhow`, `prefer`, `teach`), telling (`tell`), remembered events (`reports`, `did`), reactions `failed` and `learned`. (0.5 added `extends`, `place`, `events`, traits, death, bonds, field targets, regrowing attributes.)
+Format version: **0.7**: adds watchers and logs (`watch`), method `words` and entity `plural`. 0.6 added planning over facts (`facts`, `requires`, `gives`), emotions, `scales`, `restraint`, know-how (`knowhow`, `prefer`, `teach`), telling (`tell`), remembered events (`reports`, `did`), reactions `failed` and `learned`. (0.5 added `extends`, `place`, `events`, traits, death, bonds, field targets, regrowing attributes.)
 
 ## Shape
 
@@ -39,6 +39,7 @@ Format version: **0.6**: adds planning over facts (`facts`, `requires`, `gives`)
 | `place` | no | how many of a leaf Noah places at the start, e.g. `{ "Bush": { "count": 70, "prefer": "fertility", "avoid": { "water": 0.05 } } }` |
 | `events` | no | named world events this pack can raise (see Events) |
 | `facts` | no | named facts about what a person believes, for planning (see Planning) |
+| `watch` | no | what to show about this pack: tables to track and log lines (see Watching a pack) |
 
 Unknown keys are errors, with a "did you mean" hint. A type or edge name can be
 defined by only one pack; to change someone else's type, use `extends`.
@@ -100,6 +101,7 @@ Note: `Person.carrying` is shared. Shelter's `Deliver` gives whatever is carried
 | `role` | mind types, required: `need`, `emotion`, `goal`, `action` (a method) or `trait` |
 | `distribution` | traits: how values are spread over people (see Traits) |
 | `scales` | traits, needs, emotions: multipliers on other parts of the mind (see Scales) |
+| `plural` | entities: the word for several of them in stories (`"people"`, `"bushes"`); default is the name plus `s` |
 | `attrs` | attribute definitions (see Attributes) |
 | `build`, `recognize`, `spread` | entity rules (see Entity rules) |
 | `description` | free text |
@@ -111,7 +113,7 @@ Note: `Person.carrying` is shared. Shelter's `Deliver` gives whatever is carried
 | `need` | `start`, `rate`, `urgentAt` | A level in [0, 1] per person. `start` is rolled once; `rate` is the change per day; above `urgentAt` (default 0.7) it is urgent and people re-think when they cross it. |
 | `emotion` | `start`, `rate`, `urgentAt` | Works like a need (a level that moves), read as `emotions.X` and changed with `emotions.X` effects. Use it for fast states that colour behaviour (fear, anger) rather than drives that actions satisfy. |
 | `goal` | `tier`, `weight` | `tier` 1 survive, 2 secure, 3 belong, 4 grow. `weight` in [0, 1]: how much it matters now. An urgent tier-1 goal takes over, unless determination holds the person a little longer. |
-| `action` | `steps`, `serves`, `requires`, `gives`, `restraint`, `cost`, `knowhow` | A method. `steps`: what it does (see Steps). `serves`: how much it helps each goal. The rest: see Planning and Know-how. |
+| `action` | `steps`, `serves`, `requires`, `gives`, `restraint`, `cost`, `knowhow`, `words` | A method. `steps`: what it does (see Steps). `serves`: how much it helps each goal. `words`: how stories and logs say it (see Watching a pack). The rest: see Planning and Know-how. |
 
 People score each method they know that serves a goal by the **sum over goals
 of `weight × serves`**, check they can get there (Planning), and do the first
@@ -342,6 +344,86 @@ On a knowledge type (`core` puts it on `Sighting`):
 | `reinforce` | new confidence when seen again (reads `confidence`) |
 | `forgetBelow` | below this they forget it: the memory link is removed |
 
+## Watching a pack
+
+A pack says what is worth watching about it. The demo shows this per pack and
+never knows a pack by name, so a pack without a `watch` block has nothing to show.
+
+```json
+"watch": {
+  "color": "#6b2d5c",
+  "tables": {
+    "People": {
+      "rows": "Person",
+      "columns": { "Psychopathy": "traits.Psychopathy", "Bloodlust": "needs.Bloodlust", "Hates": "links.hates" },
+      "sort": "Psychopathy"
+    }
+  },
+  "logs": {
+    "Urges": {
+      "Stalking": { "on": "started", "if": "action == \"Murder\"", "text": "{self.name} started stalking someone", "global": true, "emphasis": "strong" }
+    },
+    "Hatred": {
+      "Hates": { "on": "linked", "if": "edge == \"hates\"", "text": "{self.name} came to hate {other.name}" }
+    }
+  }
+}
+```
+
+| Key | Meaning |
+|---|---|
+| `color` | the pack's colour, `#rrggbb`; its lines carry it everywhere |
+| `mark` | one or two characters shown in the pack's colour swatch |
+| `tables` | "track these": tables by name |
+| `logs` | "this triggers this log": groups by name, each holding log types by name |
+
+Names of tables, columns, groups and log types are letters, digits and spaces.
+
+**Tables.** `rows` is an entity type; every living node of it is a row, named by
+its `name` attribute. `columns` maps a column name to an expression; `where`
+(optional) keeps only matching rows; `sort` (optional) names a column, highest
+first. Rows of `Person` read everything a mind expression can (`needs.*`,
+`emotions.*`, `traits.*`, `links.*`, `knows.*`, `self.*`, `doing`, `plan.*`,
+`home`); other rows read only `self.<attr>`. A cell with no value shows a dash.
+
+**Logs.** A log type fires when its trigger happens and its `if` (optional) is
+true. `text` is a line with expressions in braces. `global: true` suggests showing
+it in the world log (the user can change that with a checkbox); `emphasis` is
+`strong`, `normal` (default) or `quiet`.
+
+| `on` | When | `self` | Also |
+|---|---|---|---|
+| `started` | a person starts a different action | the person | `action`, `purpose` (the method it is a step toward, or `""`), `words` |
+| `happened` | a world event is raised | who did it | `about`, `event.name`, `event.witnesses` (a count), `event.seenBy` (names, or "nobody") |
+| `witness` | once for each person who saw a world event | the witness | `other` (who did it), `about`, `event.name` |
+| `hears` | a person learns of an event they didn't see | the person | `other` (who did it, if known: `event.known`), `about`, `teller` (if told: `event.told`), `event.name` |
+| `met` | two people come within sight (fires once each way) | one of them | `other`, `rel.<edge>` |
+| `linked`, `unlinked` | an edge between two entities is added or removed | the `from` end | `other` (the `to` end), `edge`, `by` (`"molly"`, `"adam"`, …) |
+| `learned` | a person learns a method (not from birth) | the person | `other` (who from), `method`, `how` (`"watched"` or `"taught"`), `words` |
+| `died` | a person dies | the person | `other` (who killed them, if anyone) |
+| `created` | an entity comes to exist | the entity | `type` |
+| `signal` | Molly's `dusk` or `dawn` | nobody | `signal` |
+
+Every name in that table always has a value: a missing person is
+`{ name: "someone" }`, a missing text is `""`. `self`, `other`, `about` and
+`teller` have the node's attributes plus `id`, `type` and `name` (a thing without
+a name reads "a house"). When `self` is a person, `traits.*`, `needs.*` and
+`emotions.*` are theirs. `words.*` are the words of the method in question.
+
+Lines are made from the world's history and never change the world. They are
+worded when the demo reads them, a moment after they happen.
+
+**Words.** A method can say how it reads:
+
+```json
+"Gather": { "words": { "doing": "gathering wood", "did": "gathered wood", "purpose": "get wood", "name": "cut wood" } }
+```
+
+`doing` and `did` are used in a person's story ("Day 2, 06:00 – 07:08 · gathered
+wood to build a house"), `purpose` after "to" when another method is a step toward
+this one, `name` after "learned to". Without them the method's name is used in
+lowercase.
+
 ## Entity rules
 
 **`build`** — something people build. Molly places a *concept* where a person's
@@ -406,6 +488,7 @@ Limits: 500 characters, nesting depth 48, 10 000 steps.
 2. Things in the world: entity types; `leaf` if Noah may place them; `memorable` + `remember` if people should find them by memory.
 3. A need (how it rises and falls), a goal that weighs it, methods whose `steps` do something about it and whose `serves` say when. If a method needs something first, write it as a fact in `requires` and let another method `give` it; don't write "when they don't know X, explore" by hand.
 4. Reactions for what should happen on its own (anger on meeting someone, a grudge when a tree is found empty).
-5. Load it; fix whatever Archie reports, using the paths in its messages.
+5. A `watch` block: a colour, a table of the values that matter, log types for the moments worth reading; `words` on your methods.
+6. Load it; fix whatever Archie reports, using the paths in its messages.
 
 `src/packs/*.json` are the reference examples; `examples/blind/` has packs written by outside authors from this page alone. Try a pack with `npm run check-pack -- my-pack.json` (`--help` for options).

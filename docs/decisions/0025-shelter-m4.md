@@ -1,6 +1,6 @@
 # 0025 — Shelter in M4: concepts, gathering, building, villages, Entropy
 
-- Status: accepted (technical; designed by Claude during M4, open to change)
+- Status: accepted (technical; designed by Claude during M4, open to change); village recognition superseded by [0036](0036-village-is-its-members.md)
 - Date: 2026-11-14
 
 ## Context

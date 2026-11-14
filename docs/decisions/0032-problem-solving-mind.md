@@ -1,7 +1,7 @@
 # 0032 — A problem-solving mind: methods, emotions, new node types, morality
 
 - Status: accepted (direction settled; timing: before M6)
-- Date: 2026-11-15
+- Date: 2026-11-14
 
 ## Context
 The user described the next layer of the mind and asked for it to be noted.
@@ -50,7 +50,7 @@ The user described the next layer of the mind and asked for it to be noted.
 - Needs crowds and long runs: performance work (and probably a Web Worker) comes with it.
 - Fits ADR-0027: the planner is engine; methods, emotions and interactions are pack content.
 
-## Settled (2026-11-15)
+## Settled (2026-11-14)
 1. **GOAP**, chosen for emergence: methods declare preconditions and effects on what
    the person believes; the planner searches backward from the goal to steps the
    person can take now. **No depth limit.** Plans stay short in practice (a house
@@ -70,11 +70,11 @@ The user described the next layer of the mind and asked for it to be noted.
    through learning, preference and others' reactions.
 
 ## Still open
-- ~~When: before v0.1 (M6) or right after.~~ Before M6 (2026-11-15).
-- ~~The exact shape of method preconditions/effects.~~ Named facts, local requires/gives, derived preconditions (2026-11-15; ADR-0033).
+- ~~When: before v0.1 (M6) or right after.~~ Before M6 (2026-11-14).
+- ~~The exact shape of method preconditions/effects.~~ Named facts, local requires/gives, derived preconditions (2026-11-14; ADR-0033).
 
 ## Discussion
-- 2026-11-15 — User: note these to add: new node types and interactions between
+- 2026-11-14 — User: note these to add: new node types and interactions between
   nodes; emotions as a mechanic beside needs (e.g. high sexual desire raises
   aggression, low lowers it); a problem-solving brain: build a house, no wood →
   the "find wood" method from a list of skill nodes → which calls "find a tree" →
@@ -82,7 +82,7 @@ The user described the next layer of the mind and asked for it to be noted.
   marry. If behaviour isn't modelled this way already, we will switch to it. These
   methods should be learnable and preferable, which brings morality; in a crowded,
   long enough simulation we could watch morality emerge.
-- 2026-11-15 — User: use GOAP for emergence; no depth limit, the thought process
+- 2026-11-14 — User: use GOAP for emergence; no depth limit, the thought process
   runs anyway and reaching "cut a tree" takes few steps. Learning by adding talk and
   observation mechanics; talk via a pack (a good enough pack even allows building a
   school). Emotions are a multiplier affecting other behaviours, which means updating
@@ -90,20 +90,20 @@ The user described the next layer of the mind and asked for it to be noted.
   people who normally wouldn't mate can when very happy or very deprived. All fuzzy.
   No neural network, but built by hand and emergently. Traits can support or
   suppress each other (an angry person may not be very friendly at the same time).
-- 2026-11-15 — User: finish everything we addressed before moving on to M6. So ADR-0032
+- 2026-11-14 — User: finish everything we addressed before moving on to M6. So ADR-0032
   is built first (milestone M5b), together with the gaps found while reviewing how people
   are modelled: determination becomes a trait like Psychopathy, people remember witnessed
   events and other people, emotions get their own layer.
-- 2026-11-15 — User: emotions move out of needs into their own role (Fear, Anger, Dread
+- 2026-11-14 — User: emotions move out of needs into their own role (Fear, Anger, Dread
   become emotions); one `scales` mechanism lets emotions, traits and needs multiply goal
   weights, method scores, restraint and each other. All four extras are built before M6:
   a talk pack, events remembered as knowledge, ordinary people able to kill when afraid
   and angry enough, people remembering each other.
-- 2026-11-15 — User, on GOAP: no predefined decision tree. People should hold a
+- 2026-11-14 — User, on GOAP: no predefined decision tree. People should hold a
   requirement/desire in their head that propagates step by step: the house needs wood,
   wood needs a tree. That order must come out emergently. Unsure whether giving it
   up front would be more useful.
-- 2026-11-15 — Settled the open question: each method states only its own local
+- 2026-11-14 — Settled the open question: each method states only its own local
   preconditions (`requires`) and results (`gives`) over named facts about what the person
   believes; no method names another. The engine plans backward at every decision, so a
   missing fact becomes a sub-desire with the same urgency, and "house → wood → tree"

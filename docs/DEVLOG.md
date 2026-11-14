@@ -3,7 +3,42 @@
 Newest first. One entry per session: what changed, what was learned, what's next.
 Add a screenshot/GIF path whenever something is visible.
 
-## 2026-11-15 — M5b: the mind
+## 2026-11-14 — M6: packs bring their own watchers and logs
+
+- The user moved ADR-0037 into M6; it is the milestone's timeline and story panel. Format 0.7.
+- Engine: `watch` blocks checked by Archie (colour, tables, grouped log types, text with `{…}`),
+  method `words` and entity `plural`; `src/core/watch.ts` derives log lines and reads tables from
+  the event log without writing anything (a test compares world digests).
+- Content: all six default packs got a `watch` block and words. `story.ts` and the person panel no
+  longer know pack names (one left: `Rest`, for staying out late); relations in the panel are every
+  edge to another person.
+- UI: world log, a panel per pack (tables, picker with pack/group/type checkboxes, own log),
+  choices kept in local storage. Checked in the browser on seed 8.
+- Dates: every "2026-11-15" in the docs was wrong (all commits are from 2026-11-14) and is fixed.
+- Learned: need and emotion crossings are not in the event log, so a derived log can't see them yet;
+  the pack JSON files were re-indented by the script that added the blocks.
+- **Next:** rest of M6 (WFC house layouts, Noah config in the URL, README GIF); the user's calls on
+  ADR-0034 order and ADR-0036 ties.
+
+## 2026-11-14 — Behaviour coverage: primitives, a principle, villages (docs only)
+
+- Listed what modelling real human behaviour still needs, starting from the user's inquiry and
+  association ideas; 21 draft items in the parking lot. Sorted against format 0.6: five are packs
+  today, eight need a small addition, eleven need something new.
+- ADR-0034 (proposed): five primitives that cover most of it: association, a `claim` effect,
+  fields packs can write with walking cost in packs, unknowns in the planner, missing names
+  (including home as a fading memory).
+- ADR-0035 (accepted): as an engine, Castellan must offer every tool needed to model human behaviour.
+- ADR-0036 (direction accepted): a village is an entity and its members, not a radius; recognition
+  by ties is proposed and not built.
+- ADR-0037 (proposed): packs declare their own watchers (tables) and logs (grouped types, pack colour);
+  the UI shows them per pack with a checkbox to make a log type global. `story.ts` hard-codes pack words today.
+- Learned: `other`'s mind can't be read in expressions, the dead are invisible to the living, fields
+  are written once at genesis, and Molly has a fixed `MATERIAL_RADIUS` in code.
+- No code changed. **Next:** the user decides the order and timing of ADR-0034 and the ties for
+  ADR-0036; otherwise M6.
+
+## 2026-11-14 — M5b: the mind
 
 - Decided with the user: build ADR-0032 before M6. No predefined decision tree: each method states its
   own local `requires` / `gives` over named facts, the engine plans backward at every decision, and
@@ -25,7 +60,7 @@ Add a screenshot/GIF path whenever something is visible.
 - Blind-test packs migrated mechanically to 0.6 (`needs.Anger`/`needs.Fear` → `emotions.*`); all three still pass check-pack.
 - **Next:** M6: WFC house layouts, story panel polish, Noah config in the URL, README with GIF → v0.1.
 
-## 2026-11-15 — All primitives, traits, murder, pack order
+## 2026-11-14 — All primitives, traits, murder, pack order
 
 - Built all nine ADR-0029 primitives: un-startable actions aren't choices; bond data on edges (read, add,
   set, mutual); field targets (lake shores) and field values where people stand; `extends` with
@@ -40,7 +75,7 @@ Add a screenshot/GIF path whenever something is visible.
   that left people waiting forever; shore targets on dry cells; performance (knowledge cached per log length).
 - 62 tests. ADR-0031. PACKS.md format 0.5.
 
-## 2026-11-15 — Blind pack test
+## 2026-11-14 — Blind pack test
 
 - New tool: `npm run check-pack -- pack.json` (Archie + a short simulation + runtime warnings).
 - Three fresh agents wrote packs from PACKS.md + core.json alone: friendship, drinking water, food storage
@@ -48,7 +83,7 @@ Add a screenshot/GIF path whenever something is visible.
   compromise. Gaps and proposed primitives in ADR-0029.
 - Fixed: `spread` on the water field could never succeed; checker reporting; PACKS.md gaps they hit.
 
-## 2026-11-15 — M5 Behaviour in packs
+## 2026-11-14 — M5 Behaviour in packs
 
 - Engine work: Adam no longer knows verbs. Actions are step programs (goto, work, take, give, effect,
   if, finish, stay); reactions fire on sees / meets / found-empty / finished / dusk / dawn; memory rules
@@ -60,7 +95,7 @@ Add a screenshot/GIF path whenever something is visible.
 - PACKS.md rewritten for format 0.4. ADR-0028. 50 tests.
 - **Next:** M6: WFC house layouts, story panel polish, Noah config in the URL, README with GIF → v0.1.
 
-## 2026-11-15 — Engine, not game
+## 2026-11-14 — Engine, not game
 
 - Checked whether hunger, hostility and imperfect memory could be packs: they can't (actions can't
   change needs, nothing creates relations on events, memory is hard-coded). Proposed ADR-0026:

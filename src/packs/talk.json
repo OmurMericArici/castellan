@@ -1,8 +1,10 @@
 {
   "pack": "talk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "People get lonely and talk. Talking passes on what they know (places, events they heard of) and the methods they know, both ways (ADR-0032: learning through talk).",
-  "requires": ["core"],
+  "requires": [
+    "core"
+  ],
   "types": {
     "Isolation": {
       "kind": "mind",
@@ -24,18 +26,64 @@
       "role": "action",
       "description": "Walk to the nearest person, talk a while, and trade what they know and how they do things.",
       "steps": [
-        { "goto": { "person": "nearest", "within": 20 } },
-        { "work": 0.03 },
+        {
+          "goto": {
+            "person": "nearest",
+            "within": 20
+          }
+        },
+        {
+          "work": 0.03
+        },
         {
           "effect": {
             "needs.Isolation": -0.5,
             "other.needs.Isolation": -0.4,
-            "tell": { "to": "target", "what": "any", "count": 3, "mutual": true },
-            "teach": { "to": "target", "method": "any", "mutual": true }
+            "tell": {
+              "to": "target",
+              "what": "any",
+              "count": 3,
+              "mutual": true
+            },
+            "teach": {
+              "to": "target",
+              "method": "any",
+              "mutual": true
+            }
           }
         }
       ],
-      "serves": { "Company": "if(needs.Isolation > 0.35, 1, 0)" }
+      "serves": {
+        "Company": "if(needs.Isolation > 0.35, 1, 0)"
+      },
+      "words": {
+        "doing": "chatting",
+        "did": "chatted",
+        "purpose": "find someone to talk to",
+        "name": "chat"
+      }
+    }
+  },
+  "watch": {
+    "color": "#3f8f7a",
+    "tables": {
+      "Company": {
+        "rows": "Person",
+        "columns": {
+          "Isolation": "needs.Isolation"
+        },
+        "sort": "Isolation"
+      }
+    },
+    "logs": {
+      "Talk": {
+        "Chat": {
+          "on": "started",
+          "if": "action == \"Chat\"",
+          "text": "{self.name} went to find someone to talk to",
+          "emphasis": "quiet"
+        }
+      }
     }
   }
 }

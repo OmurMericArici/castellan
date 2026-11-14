@@ -59,7 +59,7 @@ even while the record is still proposed.
 | 0022 | [World core: time unit and data structures](0022-world-core.md) | accepted (technical) |
 | 0023 | [Expression language and pack format v0.1](0023-expression-language-and-pack-format.md) | accepted (technical) |
 | 0024 | [Adam in M3: rules in packs, verbs in the engine](0024-adam-m3.md) | accepted (technical) |
-| 0025 | [Shelter in M4: concepts, gathering, building, villages, Entropy](0025-shelter-m4.md) | accepted (technical) |
+| 0025 | [Shelter in M4: concepts, gathering, building, villages, Entropy](0025-shelter-m4.md) | accepted (technical; village recognition superseded by 0036) |
 | 0026 | [Behaviour in packs: steps, reactions, memory rules](0026-behaviour-in-packs.md) | accepted |
 | 0027 | [We are building an engine; the world is its default pack](0027-engine-and-default-pack.md) | accepted (principle) |
 | 0028 | [Behaviour engine in M5: how steps, reactions and memory were built](0028-behaviour-engine-m5.md) | accepted (technical) |
@@ -68,3 +68,7 @@ even while the record is still proposed.
 | 0031 | [How ADR-0029/0030 were built](0031-primitives-built.md) | accepted (technical) |
 | 0032 | [A problem-solving mind: methods, emotions, new node types, morality](0032-problem-solving-mind.md) | accepted (built in M5b) |
 | 0033 | [The mind, built: planning over facts, emotions and scales, know-how, remembered events](0033-mind-built.md) | accepted (technical) |
+| 0034 | [Five primitives for modelling behaviour](0034-behaviour-primitives.md) | proposed |
+| 0035 | [The engine offers every tool needed to model human behaviour](0035-every-tool-for-behaviour.md) | accepted (principle) |
+| 0036 | [A village is its members, not a radius](0036-village-is-its-members.md) | accepted (direction; mechanism proposed) |
+| 0037 | [Packs bring their own watchers and logs](0037-pack-watchers-and-logs.md) | accepted (built in M6) |

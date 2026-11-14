@@ -1,7 +1,7 @@
 # 0028 — Behaviour engine in M5: how steps, reactions and memory were built
 
 - Status: accepted (technical; designed by Claude during M5, open to change)
-- Date: 2026-11-15
+- Date: 2026-11-14
 
 ## Context
 ADR-0026 decided behaviour moves into packs; ADR-0027 made "engine + default
@@ -68,4 +68,4 @@ pack" the principle. This records the concrete engine design.
 - A true blind test (a fresh LLM writing a pack from PACKS.md alone) is still to do.
 
 ## Discussion
-- 2026-11-15 — Built after the user approved ADR-0026 with `meets` included.
+- 2026-11-14 — Built after the user approved ADR-0026 with `meets` included.
