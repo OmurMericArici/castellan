@@ -26,7 +26,11 @@ export type WorldEvent =
   /** Something Molly recognised that everyone can feel: dusk, dawn. */
   | { kind: "signal"; name: string }
   /** Two people came within sight of each other. */
-  | { kind: "met"; a: NodeId; b: NodeId };
+  | { kind: "met"; a: NodeId; b: NodeId }
+  /** A named world event raised by a pack (a murder); Molly decides who notices (ADR-0030). */
+  | { kind: "happened"; name: string; actor: NodeId; about?: NodeId; pos: Vec2; witnesses: NodeId[] }
+  /** A person died. They stay in the graph and the history, but no longer act. */
+  | { kind: "died"; id: NodeId; by?: NodeId };
 
 /** What a person is doing right now. Position while walking is computed from the leg. */
 export interface Activity {
@@ -164,7 +168,16 @@ function apply(world: World, event: WorldEvent): void {
       return;
     case "signal":
     case "met":
+    case "happened":
       return;
+    case "died": {
+      const n = g.node(event.id);
+      if (!n) throw new Error(`died: node ${event.id} does not exist`);
+      n.attrs["dead"] = true;
+      n.attrs["diedAt"] = world.time;
+      world.activities.delete(event.id);
+      return;
+    }
   }
 }
 

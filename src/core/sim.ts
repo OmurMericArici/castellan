@@ -25,6 +25,7 @@ export function createSimulation(world: World, opts: AdamOptions = DEFAULT_ADAM)
       entropy.startWear(id);
       molly.recognize(id);
     },
+    onEvent: (name, actor, about) => molly.noticeEvent(name, actor, about),
   };
   const handlers = new Map<string, Handler>([...adam.handlers, ...molly.handlers, ...entropy.handlers]);
   return {

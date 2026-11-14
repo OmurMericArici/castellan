@@ -106,6 +106,42 @@ export class Molly {
     return best;
   }
 
+  // ---------------------------------------------------------------- noticing events (ADR-0030)
+
+  /**
+   * A pack raised a world event. Molly records it, and decides who notices:
+   * people within sight are witnesses (they know who did it); others hear of it
+   * as the event's `heard` rule says (they know who only if someone saw).
+   */
+  noticeEvent(name: string, actor: NodeId, about: NodeId | undefined): void {
+    const w = this.world;
+    const def = w.registry.events.get(name);
+    if (!def) return;
+    const pos = this.adam.positionOf(about ?? actor) ?? this.adam.positionOf(actor);
+    if (!pos) return;
+    const others = this.adam.people().filter((p) => p.id !== actor && p.id !== about);
+    const near = (id: NodeId) => {
+      const q = this.adam.positionOf(id);
+      return q !== undefined && Math.hypot(q.x - pos.x, q.y - pos.y) <= def.seenWithin;
+    };
+    const witnesses = others.filter((p) => near(p.id));
+    emit(w, "molly", { kind: "happened", name, actor, ...(about !== undefined ? { about } : {}), pos, witnesses: witnesses.map((p) => p.id) });
+    for (const p of witnesses) this.adam.react("witness", p.id, { ...(about !== undefined ? { it: about } : {}), other: actor, event: { name, known: true } });
+    if (def.heard === "nobody") return;
+    const known = witnesses.length > 0;
+    const villageOf = (id: NodeId | undefined): NodeId | undefined => {
+      if (id === undefined) return undefined;
+      const home = this.world.graph.edgesOf(id, "livesIn").find((e) => e.from === id)?.to;
+      return home === undefined ? undefined : this.world.graph.edgesOf(home, "memberOf").find((e) => e.from === home)?.to;
+    };
+    const village = villageOf(about) ?? villageOf(actor);
+    for (const p of others) {
+      if (witnesses.includes(p)) continue;
+      if (def.heard === "village" && (village === undefined || villageOf(p.id) !== village)) continue;
+      this.adam.react("hears", p.id, { ...(about !== undefined ? { it: about } : {}), ...(known ? { other: actor } : {}), event: { name, known } });
+    }
+  }
+
   // ---------------------------------------------------------------- recognising groups
 
   /** A member was finished: join a group nearby, or form a new one if enough are close. */

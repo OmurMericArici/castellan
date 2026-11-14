@@ -232,5 +232,26 @@
         }
       }
     }
+  },
+  "place": {
+    "Tree": {
+      "count": 260,
+      "prefer": "fertility",
+      "avoid": {
+        "water": 0.05
+      }
+    },
+    "Stone": {
+      "count": 60,
+      "avoid": {
+        "water": 0.05
+      }
+    },
+    "Person": {
+      "count": 6,
+      "avoid": {
+        "water": 0.05
+      }
+    }
   }
 }

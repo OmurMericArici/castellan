@@ -9,15 +9,15 @@ import CORE from "../packs/core.json";
 import SHELTER from "../packs/shelter.json";
 import HUNGER from "../packs/hunger.json";
 import HOSTILITY from "../packs/hostility.json";
-import { DEFAULT_NOAH, NOAH_HUNGER_LEAVES } from "../ui/noah-default";
+import { DEFAULT_NOAH } from "../ui/noah-default";
+import { withPackPlacement } from "./noah";
 
 const ALL = [CORE, SHELTER, HUNGER, HOSTILITY];
-const NOAH = { ...DEFAULT_NOAH, leaves: [...DEFAULT_NOAH.leaves, ...NOAH_HUNGER_LEAVES] };
 
-function running(seed: number, packs: unknown[] = ALL, config = NOAH) {
+function running(seed: number, packs: unknown[] = ALL, config = DEFAULT_NOAH) {
   const w = createWorld(seed);
   loadPacks(w, packs);
-  genesis(w, config);
+  genesis(w, withPackPlacement(config, w.registry));
   const sim = createSimulation(w);
   sim.start();
   return sim;
@@ -36,7 +36,8 @@ describe("behaviour written as packs (ADR-0026)", () => {
   });
 
   it("hostility: an emptied tree or bush breeds a grudge against whoever emptied it", () => {
-    const sim = running(3);
+    // Grudges are rare now that berries regrow; seed 8 has some within 12 days.
+    const sim = running(8);
     sim.run(12);
     const w = sim.world;
     const g = w.graph;

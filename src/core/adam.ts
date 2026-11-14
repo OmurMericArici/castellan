@@ -52,6 +52,8 @@ interface Program {
   readonly steps: readonly Step[];
   index: number;
   target?: NodeId;
+  /** How many times the person has re-followed a moving target in this step. */
+  chase?: number;
 }
 
 interface Runtime {
@@ -64,6 +66,8 @@ interface Runtime {
   lastMet: Map<NodeId, number>;
   /** Guards against actions that finish instantly over and over at the same moment. */
   instant: { t: number; n: number };
+  /** After the guard trips, the next re-think happens no later than this. */
+  pauseUntil?: number;
 }
 
 export interface Choice {
@@ -74,6 +78,16 @@ export interface Choice {
 export interface AdamHooks {
   /** A derived entity was finished (Molly recognises groups, Entropy starts wear). */
   onBuilt?: (node: NodeId) => void;
+  /** A pack raised a world event (Molly decides who notices it). */
+  onEvent?: (name: string, actor: NodeId, about: NodeId | undefined) => void;
+}
+
+/** What a reaction knows about why it fired. */
+export interface ReactionContext {
+  it?: NodeId;
+  other?: NodeId;
+  action?: string;
+  event?: { name: string; known: boolean };
 }
 
 /** What a person knows of one thing: the claim, where it says the thing is, and what they remember of it. */
@@ -123,8 +137,9 @@ export class Adam {
     return [...this.world.registry.types.values()];
   }
 
+  /** Living people. The dead stay in the graph and the history but no longer act. */
   people(): GraphNode[] {
-    return [...this.world.graph.nodes({ kind: "entity", type: "Person" })];
+    return [...this.world.graph.nodes({ kind: "entity", type: "Person" })].filter((p) => p.attrs["dead"] !== true);
   }
 
   /** Give everyone their mind and wake them, slightly staggered. */
@@ -138,16 +153,43 @@ export class Adam {
       const rt = this.runtime(p.id);
       const rng = createRng(w.seed).fork(hash2(p.id, 0x61646d31));
       for (const t of this.types) {
-        if (t.role !== "need" && t.role !== "goal") continue;
+        if (t.role !== "need" && t.role !== "goal" && t.role !== "trait") continue;
         const mind = this.mindNodes.get(t.name)!;
         if (w.graph.edgesOf(p.id, "has").some((e) => e.to === mind)) continue;
         const fromData: Attrs = {};
         if (t.need) fromData["level"] = lazy(this.num(t.need.start, { self: selfScope(p) }, rng), 0, w.time, 0, 1);
+        // Traits: Adam draws each person's value from the pack's distribution (ADR-0030).
+        if (t.role === "trait") fromData["value"] = this.drawTrait(t, p, rng);
         const id = createEdge(w, "adam", { type: "has", from: p.id, to: mind, fromData });
         if (t.need) rt.needEdges.set(t.name, id);
       }
       schedule(w, w.time + rng.next() * 0.01, { handler: "adam.wake", data: { person: p.id, reason: "start" } });
     }
+  }
+
+  private drawTrait(t: TypeDef, p: GraphNode, rng: Rng): number {
+    const d = t.distribution;
+    if (!d) return 0;
+    if (d.kind === "expr") return this.num(d.expr, { self: selfScope(p) }, rng);
+    const total = d.bins.reduce((a, b) => a + b[2], 0);
+    let r = rng.next() * total;
+    for (const [from, to, weight] of d.bins) {
+      if (r < weight) return from + rng.next() * (to - from);
+      r -= weight;
+    }
+    const last = d.bins[d.bins.length - 1]!;
+    return last[1];
+  }
+
+  /** A person's trait values. */
+  traits(id: NodeId): Record<string, number> {
+    const g = this.world.graph;
+    const out: Record<string, number> = {};
+    for (const e of g.edgesOf(id, "has")) {
+      const mind = g.node(e.to);
+      if (mind && this.world.registry.types.get(mind.type)?.role === "trait") out[mind.type] = num(e.fromData["value"]);
+    }
+    return out;
   }
 
   /** Molly's signals (dusk, dawn) reach everyone at once; packs may react to them. */
@@ -182,8 +224,23 @@ export class Adam {
     return out;
   }
 
-  /** Everything the person knows of, newest version of each thing. */
+  private knowCache = new Map<NodeId, { at: number; list: Known[] }>();
+  private scopeCache = new Map<string, { at: number; scope: Scope }>();
+
+  /** Everything the person knows of, newest version of each thing. Cached until the world changes. */
   knowledge(person: NodeId, type?: string): Known[] {
+    const at = this.world.log.length;
+    let hit = this.knowCache.get(person);
+    if (!hit || hit.at !== at) {
+      hit = { at, list: this.readKnowledge(person) };
+      this.knowCache.set(person, hit);
+    }
+    if (!type) return hit.list;
+    const g = this.world.graph;
+    return hit.list.filter((k) => g.node(k.subject)?.type === type);
+  }
+
+  private readKnowledge(person: NodeId): Known[] {
     const g = this.world.graph;
     const out: Known[] = [];
     for (const k of g.edgesOf(person, "knows")) {
@@ -192,7 +249,7 @@ export class Adam {
       if (!claim) continue;
       for (const a of g.edgesOf(claim.id, "about")) {
         const s = g.node(a.to);
-        if (!s || (type && s.type !== type)) continue;
+        if (!s) continue;
         out.push({ subject: s.id, claim: claim.id, pos: { x: num(claim.attrs["x"]), y: num(claim.attrs["y"]) }, it: { ...attrScope(claim.attrs), id: s.id } });
       }
     }
@@ -205,6 +262,16 @@ export class Adam {
 
   /** What a person's mind expressions see right now (also used by Molly). */
   scopeFor(person: GraphNode, doing = this.world.activities.get(person.id)?.action ?? ""): Scope {
+    const key = `${person.id}:${doing}`;
+    const at = this.world.log.length + this.world.time;
+    const hit = this.scopeCache.get(key);
+    if (hit && hit.at === at) return hit.scope;
+    const scope = this.computeScope(person, doing);
+    this.scopeCache.set(key, { at, scope });
+    return scope;
+  }
+
+  private computeScope(person: GraphNode, doing: string): Scope {
     const knows: Scope = {};
     for (const t of this.types) if (t.memorable) knows[t.name] = 0;
     for (const k of this.knowledge(person.id)) {
@@ -225,7 +292,53 @@ export class Adam {
         workLeft: plan ? Math.max(0, plan.rule.work - num(plan.node.attrs["worked"])) : 0,
       },
       home: homeOf(this.world, person.id) !== undefined,
+      traits: this.traits(person.id),
+      links: this.linkCounts(person.id),
+      field: this.fieldsAt(this.positionOf(person.id) ?? person.pos),
     };
+  }
+
+  private linkCounts(id: NodeId): Scope {
+    const out: Scope = {};
+    for (const name of this.world.registry.edges.keys()) out[name] = 0;
+    for (const e of this.world.graph.edgesOf(id)) {
+      if (e.from !== id) continue;
+      const other = this.world.graph.node(e.to);
+      if (other?.attrs["dead"] === true) continue;
+      out[e.type] = (out[e.type] as number) + 1;
+    }
+    return out;
+  }
+
+  private fieldsAt(pos: Vec2 | undefined): Scope {
+    const out: Scope = {};
+    const space = this.world.space;
+    if (!space || !pos) return out;
+    for (const [name, f] of space.fields) out[name] = f.sample(pos.x, pos.y);
+    return out;
+  }
+
+  /** The person's own end of each edge toward `other`: declared fields default to 0. */
+  private bondWith(id: NodeId, other: NodeId | undefined): Scope {
+    const out: Scope = {};
+    for (const [name, def] of this.world.registry.edges) {
+      const rec: Scope = {};
+      for (const [f, a] of def.fromData) rec[f] = a.type === "number" ? 0 : a.type === "boolean" ? false : "";
+      out[name] = rec;
+    }
+    if (other === undefined) return out;
+    for (const e of this.world.graph.edgesOf(id)) {
+      if (e.from !== id || e.to !== other) continue;
+      out[e.type] = { ...(out[e.type] as Scope), ...attrScope(e.fromData) };
+    }
+    return out;
+  }
+
+  private relWith(id: NodeId, other: NodeId | undefined): Scope {
+    const rel: Scope = {};
+    for (const name of this.world.registry.edges.keys()) rel[name] = false;
+    if (other !== undefined) for (const e of this.world.graph.edgesOf(id)) if (e.from === id && e.to === other) rel[e.type] = true;
+    return rel;
   }
 
   // ---------------------------------------------------------------- deciding
@@ -234,7 +347,7 @@ export class Adam {
   private decide(id: NodeId, reason: string, finished = false): void {
     const w = this.world;
     const person = w.graph.node(id);
-    if (!person || !w.space) return;
+    if (!person || !w.space || person.attrs["dead"] === true) return;
     const rt = this.runtime(id);
     if (rt.wake) w.queue.cancel(rt.wake);
     rt.wake = undefined;
@@ -263,6 +376,11 @@ export class Adam {
     const scores: Choice[] = [];
     for (const t of this.types) {
       if (!t.action) continue;
+      // An action that can't even start (nowhere to go first) is not a choice (ADR-0029 #1).
+      const first = t.action.steps[0];
+      if (first?.kind === "goto" && !first.optional && !(t.name === current && ongoing)) {
+        if (this.firstDestinations(person, first.targets, { action: t.name, steps: t.action.steps, index: 0 }, rt).length === 0) continue;
+      }
       let score = 0;
       for (const g of goals) {
         const src = t.action.serves.get(g.name);
@@ -307,8 +425,11 @@ export class Adam {
     const steps = this.world.registry.types.get(action)?.action?.steps;
     if (!steps) return;
     if (rt.instant.t === this.world.time && rt.instant.n >= 3) {
-      // The same moment keeps producing actions that end at once: just wait.
-      this.stay(person.id, action, rt);
+      // The same moment keeps producing actions that end at once: pause briefly, then think again.
+      const w = this.world;
+      emit(w, "adam", { kind: "activity", person: person.id, activity: { action, startedAt: w.time } });
+      rt.program = undefined;
+      rt.pauseUntil = w.time + 0.05;
       return;
     }
     rt.program = { action, steps, index: 0 };
@@ -329,7 +450,7 @@ export class Adam {
       try {
       switch (step.kind) {
         case "goto": {
-          const dests = this.destinations(person, step.target, prog, rt);
+          const dests = this.firstDestinations(person, step.targets, prog, rt);
           if (dests.length === 0) {
             if (step.optional) break;
             return this.end(id, rt, "nothing to go to");
@@ -337,6 +458,8 @@ export class Adam {
           const near = dests.find((d) => dist(person.pos!, d.pos) <= THERE);
           if (near) {
             if (near.node !== undefined) prog.target = near.node;
+            // Within reach: take the last step without a walking leg.
+            if (near.node === undefined && dist(person.pos!, near.pos) > 0.05) emit(w, "adam", { kind: "node.moved", id, pos: round2(near.pos) });
             break;
           }
           if (this.walk(person, prog.action, dests, rt)) return;
@@ -344,7 +467,7 @@ export class Adam {
           return this.end(id, rt, "couldn't get there");
         }
         case "work": {
-          const d = this.num(step.duration, this.stepScope(person, prog));
+          const d = this.num(step.duration, this.stepScope(person, prog), this.rngFor(id, `step${prog.index}`));
           if (d > 0) {
             this.work(id, prog.action, d, rt);
             return;
@@ -361,7 +484,7 @@ export class Adam {
             this.react("found-empty", id, { it: target.id });
             return this.end(id, rt, "found it empty");
           }
-          const amount = Math.min(available, Math.max(0, this.num(step.amount, this.stepScope(person, prog))));
+          const amount = Math.min(available, Math.max(0, this.num(step.amount, this.stepScope(person, prog), this.rngFor(id, `step${prog.index}`))));
           if (amount > 0) {
             emit(w, "adam", { kind: "node.attrs", id: target.id, attrs: { [step.from]: available - amount, lastTakenBy: id } });
             if (step.to) this.addTo(id, step.to, amount);
@@ -372,18 +495,21 @@ export class Adam {
           const target = prog.target !== undefined ? w.graph.node(prog.target) : undefined;
           if (!target) return this.end(id, rt, "nobody to give to");
           const have = num(person.attrs[step.from]);
-          const amount = Math.min(have, Math.max(0, this.num(step.amount, this.stepScope(person, prog))));
+          const amount = Math.min(have, Math.max(0, this.num(step.amount, this.stepScope(person, prog), this.rngFor(id, `step${prog.index}`))));
           if (amount > 0) {
             this.addTo(id, step.from, -amount);
             this.addTo(target.id, step.to, amount);
           }
           break;
         }
-        case "effect":
-          this.apply(id, step.effects, this.stepScope(person, prog), prog.target, undefined);
+        case "effect": {
+          const target = prog.target !== undefined ? w.graph.node(prog.target) : undefined;
+          const other = target?.type === "Person" ? target.id : undefined;
+          this.apply(id, step.effects, this.stepScope(person, prog), prog.target, other, this.rngFor(id, `step${prog.index}`));
           break;
+        }
         case "if":
-          if (evaluate(step.cond, { scope: this.stepScope(person, prog) }) !== true) return this.end(id, rt, "stopped");
+          if (evaluate(step.cond, { scope: this.stepScope(person, prog), rng: this.rngFor(id, `step${prog.index}`) }) !== true) return this.end(id, rt, "stopped");
           break;
         case "finish":
           this.finishPlan(id);
@@ -454,8 +580,23 @@ export class Adam {
     const rt = this.runtime(d.person);
     rt.step = [];
     emit(w, "adam", { kind: "node.moved", id: d.person, pos: leg.path[leg.path.length - 1]! });
-    if (!rt.program) return this.decide(d.person, "arrived", true);
-    rt.program.index++;
+    const prog = rt.program;
+    if (!prog) return this.decide(d.person, "arrived", true);
+    // Walking to a person who moved on: follow them again, a few times at most.
+    const target = prog.target !== undefined ? w.graph.node(prog.target) : undefined;
+    if (prog.steps[prog.index]?.kind === "goto" && target?.type === "Person") {
+      const there = this.positionOf(target.id);
+      const here = w.graph.node(d.person)!.pos!;
+      if (target.attrs["dead"] === true || !there) return this.end(d.person, rt, "lost them");
+      if (dist(here, there) > THERE * 2) {
+        prog.chase = (prog.chase ?? 0) + 1;
+        if (prog.chase > 3) return this.end(d.person, rt, "lost them");
+        if (this.walk(w.graph.node(d.person)!, prog.action, [{ pos: there, node: target.id }], rt)) return;
+        return this.end(d.person, rt, "lost them");
+      }
+    }
+    prog.chase = 0;
+    prog.index++;
     this.run(d.person, rt);
   }
 
@@ -470,6 +611,15 @@ export class Adam {
     if (step?.kind === "work" && step.progress && prog.target !== undefined) this.addTo(prog.target, step.progress, this.world.time - act.startedAt);
     prog.index++;
     this.run(d.person, rt);
+  }
+
+  /** The first alternative target that has anywhere to go. */
+  private firstDestinations(person: GraphNode, targets: readonly Target[], prog: Program, rt: Runtime): { pos: Vec2; node?: NodeId }[] {
+    for (const t of targets) {
+      const d = this.destinations(person, t, prog, rt);
+      if (d.length) return d;
+    }
+    return [];
   }
 
   /** Where a goto step may lead, best first. */
@@ -495,12 +645,26 @@ export class Adam {
       case "target": {
         const n = prog.target !== undefined ? w.graph.node(prog.target) : undefined;
         const pos = n ? (n.type === "Person" ? this.positionOf(n.id) : n.pos) : undefined;
-        return pos && n ? [{ pos, node: n.id }] : [];
+        return pos && n && n.attrs["dead"] !== true ? [{ pos, node: n.id }] : [];
+      }
+      case "person": {
+        const base = this.scopeFor(person);
+        return this.people()
+          .filter((o) => o.id !== person.id)
+          .map((o) => ({ node: o.id, pos: this.positionOf(o.id)!, o }))
+          .filter((d) => d.pos && dist(from, d.pos) <= target.within)
+          .filter((d) => !target.where || this.test(target.where, { ...base, it: { ...attrScope(d.o.attrs), id: d.o.id }, rel: this.relWith(person.id, d.o.id), bond: this.bondWith(person.id, d.o.id) }, "goto.person.where"))
+          .sort((a, b) => dist(from, a.pos) - dist(from, b.pos))
+          .map((d) => ({ node: d.node, pos: d.pos }));
+      }
+      case "field": {
+        const spot = this.nearField(from, target.field, target.above);
+        return spot ? [{ pos: spot }] : [];
       }
       case "linked":
         return w.graph
           .edgesOf(person.id, target.edge)
-          .filter((e) => e.from === person.id)
+          .filter((e) => e.from === person.id && w.graph.node(e.to)?.attrs["dead"] !== true)
           .map((e) => ({ node: e.to, pos: this.positionOf(e.to) }))
           .filter((d): d is { node: NodeId; pos: Vec2 } => d.pos !== undefined)
           .sort((a, b) => dist(from, a.pos) - dist(from, b.pos));
@@ -511,71 +675,153 @@ export class Adam {
     }
   }
 
+  /** The nearest walkable cell next to where a field is above a level (e.g. the shore of a lake). */
+  private nearField(from: Vec2, field: string, above: number): Vec2 | undefined {
+    const space = this.world.space!;
+    const f = space.fields.get(field);
+    if (!f) return undefined;
+    const fx = Math.floor(from.x);
+    const fy = Math.floor(from.y);
+    for (let r = 0; r <= 40; r++) {
+      let best: Vec2 | undefined;
+      let bestD = Infinity;
+      let bestWet = false;
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+          const x = fx + dx + 0.5;
+          const y = fy + dy + 0.5;
+          if (!passable(space, x, y)) continue;
+          const side = f.at(x, y) > above ? [0, 0] : [[1, 0], [-1, 0], [0, 1], [0, -1]].find(([ax, ay]) => f.at(x + ax!, y + ay!) > above);
+          if (!side) continue;
+          // Stand at the edge of the cell, toward the water: the field reads above 0 there.
+          const spot = { x: x + side[0]! * 0.45, y: y + side[1]! * 0.45 };
+          const wet = f.sample(spot.x, spot.y) > 0;
+          const d = Math.hypot(spot.x - from.x, spot.y - from.y);
+          if ((wet && !bestWet) || (wet === bestWet && d < bestD)) {
+            bestD = d;
+            best = spot;
+            bestWet = wet;
+          }
+        }
+      }
+      if (best) return best;
+    }
+    return undefined;
+  }
+
   // ---------------------------------------------------------------- effects and reactions
 
   private stepScope(person: GraphNode, prog: Program): Scope {
     const target = prog.target !== undefined ? this.world.graph.node(prog.target) : undefined;
-    return { ...this.scopeFor(person), target: target ? { ...attrScope(target.attrs), id: target.id } : {} };
+    return {
+      ...this.scopeFor(person),
+      target: target ? { ...attrScope(target.attrs), id: target.id } : {},
+      bond: this.bondWith(person.id, target?.type === "Person" ? target.id : undefined),
+    };
   }
 
-  private apply(id: NodeId, effects: readonly Effect[], scope: Scope, target: NodeId | undefined, other: NodeId | undefined): void {
+  private apply(id: NodeId, effects: readonly Effect[], scope: Scope, target: NodeId | undefined, other: NodeId | undefined, rng?: Rng): void {
     const w = this.world;
     const g = w.graph;
-    const rt = this.runtime(id);
     const resolve = (ref: Ref): NodeId | undefined => {
       if (ref.kind === "target") return target;
       if (ref.kind === "other") return other;
-      const v = evaluate(ref.expr, { scope });
+      const v = evaluate(ref.expr, rng ? { scope, rng } : { scope });
       return typeof v === "number" && g.node(v) ? v : undefined;
     };
+    const who = (on: "self" | "target" | "other"): NodeId | undefined => (on === "self" ? id : on === "target" ? target : other);
+    const touched = new Set<NodeId>();
     for (const e of effects) {
       if (e.kind === "need") {
-        const eid = rt.needEdges.get(e.need);
+        const on = who(e.on);
+        if (on === undefined || g.node(on)?.attrs["dead"] === true) continue;
+        const eid = this.runtime(on).needEdges.get(e.need);
         const level = eid !== undefined ? g.edge(eid)?.fromData["level"] : undefined;
         if (eid === undefined || !isLazy(level)) continue;
-        const next = clamp01(readLazy(level, w.time) + this.num(e.delta, scope));
+        const next = clamp01(readLazy(level, w.time) + this.num(e.delta, scope, rng));
         emit(w, "adam", { kind: "edge.data", id: eid, end: "from", data: { level: withValue(level, w.time, next) } });
+        touched.add(on);
       } else if (e.kind === "set") {
-        const on = e.on === "self" ? id : target;
-        if (on !== undefined && g.node(on)) emit(w, "adam", { kind: "node.attrs", id: on, attrs: { [e.attr]: this.num(e.value, scope) } });
-      } else {
+        const on = who(e.on);
+        if (on !== undefined && g.node(on)) emit(w, "adam", { kind: "node.attrs", id: on, attrs: { [e.attr]: this.num(e.value, scope, rng) } });
+      } else if (e.kind === "link" || e.kind === "unlink") {
         const to = resolve(e.to);
         if (to === undefined || to === id) continue;
-        const existing = g.edgesOf(id, e.edge).filter((x) => x.from === id && x.to === to);
-        if (e.kind === "link" && existing.length === 0) createEdge(w, "adam", { type: e.edge, from: id, to });
-        if (e.kind === "unlink") for (const x of existing) emit(w, "adam", { kind: "edge.removed", id: x.id });
+        const pairs: [NodeId, NodeId][] = e.mutual ? [[id, to], [to, id]] : [[id, to]];
+        for (const [a, b] of pairs) {
+          const existing = g.edgesOf(a, e.edge).filter((x) => x.from === a && x.to === b);
+          if (e.kind === "unlink") {
+            for (const x of existing) emit(w, "adam", { kind: "edge.removed", id: x.id });
+            continue;
+          }
+          const edgeId = existing[0]?.id ?? createEdge(w, "adam", { type: e.edge, from: a, to: b });
+          if (e.add.size || e.set.size) {
+            const edge = g.edge(edgeId)!;
+            const data: Attrs = {};
+            for (const [f, src] of e.add) data[f] = num(edge.fromData[f]) + this.num(src, scope, rng);
+            for (const [f, src] of e.set) data[f] = this.num(src, scope, rng);
+            emit(w, "adam", { kind: "edge.data", id: edgeId, end: "from", data });
+          }
+        }
+      } else if (e.kind === "kill") {
+        const victim = resolve(e.who);
+        if (victim !== undefined) this.kill(victim, id);
+      } else if (e.kind === "event") {
+        this.hooks.onEvent?.(e.name, id, e.about ? resolve(e.about) : undefined);
       }
     }
-    const person = g.node(id);
-    if (person && effects.some((e) => e.kind === "need")) {
-      this.scheduleWake(person, rt, typeof person.attrs["determination"] === "number" ? person.attrs["determination"] : 0.5);
+    for (const t of touched) {
+      const p = g.node(t);
+      if (p) this.scheduleWake(p, this.runtime(t), typeof p.attrs["determination"] === "number" ? p.attrs["determination"] : 0.5);
     }
   }
 
-  /** Run the packs' reactions to something that happened to a person. */
-  private react(on: ReactionEvent, id: NodeId, ctx: { it?: NodeId; other?: NodeId; action?: string }): void {
+  /** A person dies: they stop acting; the graph and the log keep them. */
+  private kill(victim: NodeId, by: NodeId): void {
+    const w = this.world;
+    const node = w.graph.node(victim);
+    if (!node || node.type !== "Person" || node.attrs["dead"] === true) return;
+    const rt = this.runtime(victim);
+    if (rt.wake) w.queue.cancel(rt.wake);
+    for (const t of rt.step) w.queue.cancel(t);
+    rt.step = [];
+    rt.program = undefined;
+    const pos = this.positionOf(victim);
+    if (pos && w.activities.get(victim)?.leg) emit(w, "adam", { kind: "node.moved", id: victim, pos: round2(pos) });
+    emit(w, "adam", { kind: "died", id: victim, by });
+  }
+
+  /** Run the packs' reactions to something that happened to a person (Molly calls this for events). */
+  react(on: ReactionEvent, id: NodeId, ctx: ReactionContext): void {
     const w = this.world;
     const reactions = w.registry.reactions.filter((r) => r.on === on);
     if (!reactions.length) return;
     const person = w.graph.node(id);
-    if (!person) return;
+    if (!person || person.attrs["dead"] === true) return;
     const it = ctx.it !== undefined ? w.graph.node(ctx.it) : undefined;
     const other = ctx.other !== undefined ? w.graph.node(ctx.other) : undefined;
-    const rel: Scope = {};
-    for (const name of w.registry.edges.keys()) rel[name] = false;
-    if (other) for (const e of w.graph.edgesOf(id)) if (e.from === id && e.to === other.id) rel[e.type] = true;
-    const scope: Scope = {
-      ...this.scopeFor(person),
-      it: it ? { ...attrScope(it.attrs), id: it.id } : {},
-      other: other ? { ...attrScope(other.attrs), id: other.id } : {},
-      rel,
-      action: ctx.action ?? "",
-    };
     for (const r of reactions) {
+      // Each reaction sees what the earlier ones did.
+      const scope: Scope = {
+        ...this.scopeFor(person),
+        it: it ? { ...attrScope(it.attrs), id: it.id } : {},
+        other: other ? { ...attrScope(other.attrs), id: other.id } : {},
+        rel: this.relWith(id, other?.id),
+        bond: this.bondWith(id, other?.id),
+        action: ctx.action ?? "",
+        event: ctx.event ? { name: ctx.event.name, known: ctx.event.known } : { name: "", known: false },
+      };
       const label = `${r.pack} reactions[${r.index}] (${r.on})`;
-      if (r.cond && !this.test(r.cond, scope, label)) continue;
+      const rng = this.rngFor(id, `react:${r.pack}:${r.index}:${ctx.other ?? ""}:${ctx.it ?? ""}`);
       try {
-        this.apply(id, r.effects, scope, ctx.it, ctx.other);
+        if (r.cond && evaluate(r.cond, { scope, rng }) !== true) continue;
+      } catch (e) {
+        this.warn(label, e);
+        continue;
+      }
+      try {
+        this.apply(id, r.effects, scope, ctx.it, ctx.other, rng);
       } catch (e) {
         this.warn(label, e);
       }
@@ -616,6 +862,7 @@ export class Adam {
     if (rt.wake) w.queue.cancel(rt.wake);
     const now = w.time;
     let at = now + this.opts.maxIdle;
+    if (rt.pauseUntil !== undefined && rt.pauseUntil > now) at = Math.min(at, rt.pauseUntil);
     const act = w.activities.get(person.id);
     if (act?.leg && act.leg.arrive > now) at = Math.max(at, act.leg.arrive + 1e-6);
     for (const [name, eid] of rt.needEdges) {

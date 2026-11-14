@@ -135,6 +135,21 @@ export function drawWorld(ctx: CanvasRenderingContext2D, sim: Simulation, base: 
     ctx.fillRect(0, 0, space.width * s, space.height * s);
   }
 
+  // The dead lie where they fell.
+  for (const p of world.graph.nodes({ kind: "entity", type: "Person" })) {
+    if (p.attrs["dead"] !== true || !p.pos) continue;
+    const x = p.pos.x * s;
+    const y = p.pos.y * s;
+    ctx.strokeStyle = p.id === o.selected ? "#ffe08a" : "#3a2a2a";
+    ctx.lineWidth = Math.max(1.5, s * 0.3);
+    ctx.beginPath();
+    ctx.moveTo(x - s * 0.6, y - s * 0.6);
+    ctx.lineTo(x + s * 0.6, y + s * 0.6);
+    ctx.moveTo(x + s * 0.6, y - s * 0.6);
+    ctx.lineTo(x - s * 0.6, y + s * 0.6);
+    ctx.stroke();
+  }
+
   for (const p of sim.adam.people()) {
     const pos = sim.adam.positionOf(p.id);
     if (!pos) continue;

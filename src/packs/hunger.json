@@ -1,19 +1,37 @@
 {
   "pack": "hunger",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "People get hungry. They remember berry bushes, forage from them, and search when they know none. Bushes spread on fertile land.",
-  "requires": ["core"],
+  "requires": [
+    "core"
+  ],
   "types": {
     "Bush": {
       "kind": "entity",
       "leaf": true,
       "memorable": true,
-      "remember": ["food"],
+      "remember": [
+        "food"
+      ],
       "description": "A berry bush.",
       "attrs": {
-        "food": { "type": "number", "min": 0, "default": { "expr": "rand_int(3, 8)" }, "description": "Handfuls of berries left." }
+        "food": {
+          "type": "number",
+          "min": 0,
+          "max": 8,
+          "regrow": 0.5,
+          "default": {
+            "expr": "rand_int(3, 8)"
+          },
+          "description": "Handfuls of berries left; half a handful grows back each day."
+        }
       },
-      "spread": { "every": 2, "count": 4, "radius": 3, "field": "fertility" }
+      "spread": {
+        "every": 2,
+        "count": 4,
+        "radius": 3,
+        "field": "fertility"
+      }
     },
     "Hunger": {
       "kind": "mind",
@@ -35,19 +53,54 @@
       "role": "action",
       "description": "Walk to a bush they remember having berries, pick a handful and eat it.",
       "steps": [
-        { "goto": { "known": "Bush", "where": "it.food > 0" } },
-        { "work": 0.02 },
-        { "take": { "from": "food", "amount": 1 } },
-        { "effect": { "needs.Hunger": -0.4 } }
+        {
+          "goto": {
+            "known": "Bush",
+            "where": "it.food > 0"
+          }
+        },
+        {
+          "work": 0.02
+        },
+        {
+          "take": {
+            "from": "food",
+            "amount": 1
+          }
+        },
+        {
+          "effect": {
+            "needs.Hunger": -0.4
+          }
+        }
       ],
-      "serves": { "Eat": "if(needs.Hunger > 0.3, 1, 0)" }
+      "serves": {
+        "Eat": "if(needs.Hunger > 0.3, 1, 0)"
+      }
     },
     "SeekFood": {
       "kind": "mind",
       "role": "action",
       "description": "Look for food when they know of none.",
-      "steps": [{ "goto": { "explore": true } }],
-      "serves": { "Eat": "if(knows.Bush == 0 and needs.Hunger > 0.3, 0.9, 0)" }
+      "steps": [
+        {
+          "goto": {
+            "explore": true
+          }
+        }
+      ],
+      "serves": {
+        "Eat": "if(knows.Bush == 0 and needs.Hunger > 0.3, 0.9, 0)"
+      }
+    }
+  },
+  "place": {
+    "Bush": {
+      "count": 70,
+      "prefer": "fertility",
+      "avoid": {
+        "water": 0.05
+      }
     }
   }
 }

@@ -16,6 +16,8 @@ export interface AttrDef {
   readonly min?: number;
   readonly max?: number;
   readonly default?: { literal: number | string | boolean } | { expr: Compiled };
+  /** Entity number attributes: amount regained per day, up to `max` (Entropy). */
+  readonly regrow?: number;
   readonly description?: string;
 }
 
@@ -54,11 +56,14 @@ export type Target =
   | { readonly kind: "explore" }
   | { readonly kind: "wander"; readonly radius: number }
   | { readonly kind: "linked"; readonly edge: string }
+  | { readonly kind: "person"; readonly within: number; readonly where?: Compiled }
+  | { readonly kind: "field"; readonly field: string; readonly above: number }
   | { readonly kind: "target" };
 
 /** One step of an action. The engine knows steps, never mechanics (ADR-0027). */
 export type Step =
-  | { readonly kind: "goto"; readonly target: Target; readonly optional: boolean }
+  /** The first alternative that has somewhere to go is used (ADR-0029 #8). */
+  | { readonly kind: "goto"; readonly targets: readonly Target[]; readonly optional: boolean }
   | { readonly kind: "work"; readonly duration: NumberSource; readonly progress?: string }
   | { readonly kind: "take"; readonly from: string; readonly to?: string; readonly amount: NumberSource }
   | { readonly kind: "give"; readonly from: string; readonly to: string; readonly amount: NumberSource }
@@ -70,13 +75,39 @@ export type Step =
 /** Who an effect's link points at: the current target, the other person (meets), or an id expression. */
 export type Ref = { readonly kind: "target" } | { readonly kind: "other" } | { readonly kind: "expr"; readonly expr: Compiled };
 
+export type Who = "self" | "target" | "other";
+
 export type Effect =
-  | { readonly kind: "need"; readonly need: string; readonly delta: NumberSource }
-  | { readonly kind: "set"; readonly on: "self" | "target"; readonly attr: string; readonly value: NumberSource }
-  | { readonly kind: "link" | "unlink"; readonly edge: string; readonly to: Ref };
+  | { readonly kind: "need"; readonly on: Who; readonly need: string; readonly delta: NumberSource }
+  | { readonly kind: "set"; readonly on: Who; readonly attr: string; readonly value: NumberSource }
+  | {
+      readonly kind: "link" | "unlink";
+      readonly edge: string;
+      readonly to: Ref;
+      /** Also the same edge back, from them to the person. */
+      readonly mutual: boolean;
+      /** Add to / set data on the person's end of the edge (and theirs, if mutual). */
+      readonly add: ReadonlyMap<string, NumberSource>;
+      readonly set: ReadonlyMap<string, NumberSource>;
+    }
+  | { readonly kind: "kill"; readonly who: Ref }
+  | { readonly kind: "event"; readonly name: string; readonly about?: Ref };
+
+/** A world event a pack can raise; Molly decides who notices it (ADR-0030). */
+export interface EventDef {
+  readonly name: string;
+  readonly pack: string;
+  /** People within this many cells are witnesses. */
+  readonly seenWithin: number;
+  /** Who else hears of it: everyone, people of the same village, or nobody. */
+  readonly heard: "everyone" | "village" | "nobody";
+}
+
+/** How a trait's value is drawn for each person (ADR-0030). */
+export type Distribution = { readonly kind: "expr"; readonly expr: NumberSource } | { readonly kind: "histogram"; readonly bins: readonly (readonly [number, number, number])[] };
 
 /** Events a pack can react to. */
-export const REACTION_EVENTS = ["sees", "meets", "found-empty", "finished", "dusk", "dawn"] as const;
+export const REACTION_EVENTS = ["sees", "meets", "found-empty", "finished", "dusk", "dawn", "witness", "hears"] as const;
 export type ReactionEvent = (typeof REACTION_EVENTS)[number];
 
 export interface Reaction {
@@ -100,13 +131,15 @@ export interface MemoryRule {
 }
 
 /** Names a mind expression may read. */
-export const MIND_SCOPE = ["needs", "night", "knows", "self", "doing", "plan", "home"] as const;
-/** Inside steps the current target is readable too. */
-export const STEP_SCOPE = [...MIND_SCOPE, "target"] as const;
+export const MIND_SCOPE = ["needs", "night", "knows", "self", "doing", "plan", "home", "traits", "links", "field"] as const;
+/** Inside steps the current target is readable too, and the person's bond data toward it. */
+export const STEP_SCOPE = [...MIND_SCOPE, "target", "bond"] as const;
 /** A `known` target's `where` reads what the person remembers of the thing as `it`. */
 export const WHERE_SCOPE = [...MIND_SCOPE, "it"] as const;
-/** Reactions see the thing (`it`), the other person (`other`), relations to them (`rel`) and the finished action. */
-export const REACTION_SCOPE = [...MIND_SCOPE, "it", "other", "rel", "action"] as const;
+/** A `person` target's `where` reads the other person as `it` and the person's edges to them. */
+export const PERSON_WHERE_SCOPE = [...MIND_SCOPE, "it", "rel", "bond"] as const;
+/** Reactions see the thing (`it`), the other person (`other`), relations and bonds to them, the finished action and the event. */
+export const REACTION_SCOPE = [...MIND_SCOPE, "it", "other", "rel", "bond", "action", "event"] as const;
 /** Fields of `plan` in mind expressions (the person's current build project). */
 export const PLAN_FIELDS = ["active", "missing", "ready", "workLeft"] as const;
 /** Names a build `spot` expression may read: `field.fertility` etc. at the candidate spot. */
@@ -174,6 +207,8 @@ export interface TypeDef {
   readonly remember: readonly string[];
   /** Knowledge types: how people remember it. */
   readonly memory?: MemoryRule;
+  /** Trait types: how the value is distributed over people. */
+  readonly distribution?: Distribution;
   readonly need?: NeedRule;
   readonly goal?: GoalRule;
   readonly action?: ActionRule;
@@ -194,11 +229,23 @@ export interface EdgeTypeDef {
   readonly description?: string;
 }
 
+/** A pack's suggestion for how many of a leaf Noah places at the start. */
+export interface PlaceDef {
+  readonly type: string;
+  readonly pack: string;
+  readonly count: number;
+  readonly prefer?: string;
+  readonly avoid: readonly { field: string; above: number }[];
+}
+
 export interface Registry {
   readonly packs: readonly { id: string; version: string }[];
   readonly types: ReadonlyMap<string, TypeDef>;
   readonly edges: ReadonlyMap<string, EdgeTypeDef>;
   readonly reactions: readonly Reaction[];
+  readonly events: ReadonlyMap<string, EventDef>;
+  /** Later packs override earlier ones for the same type. */
+  readonly place: ReadonlyMap<string, PlaceDef>;
 }
 
 export interface PackError {
@@ -211,7 +258,7 @@ export interface PackError {
 
 export type CheckResult = { ok: true; registry: Registry } | { ok: false; errors: PackError[] };
 
-export const EMPTY_REGISTRY: Registry = { packs: [], types: new Map(), edges: new Map(), reactions: [] };
+export const EMPTY_REGISTRY: Registry = { packs: [], types: new Map(), edges: new Map(), reactions: [], events: new Map(), place: new Map() };
 
 export function formatPackError(e: PackError): string {
   return e.path ? `${e.pack} › ${e.path}: ${e.message}` : `${e.pack}: ${e.message}`;
@@ -377,16 +424,36 @@ const MIND_KEYS: Record<MindRole, readonly string[]> = {
   need: ["start", "rate", "urgentAt"],
   goal: ["tier", "weight"],
   action: ["steps", "serves"],
-  trait: [],
+  trait: ["distribution"],
 };
 const ALL_MIND_KEYS: readonly string[] = Object.values(MIND_KEYS).flat();
 
-function checkMind(c: Checker, spec: Obj, p: string, role: MindRole): Pick<TypeDef, "need" | "goal" | "action"> {
+function checkMind(c: Checker, spec: Obj, p: string, role: MindRole): Pick<TypeDef, "need" | "goal" | "action" | "distribution"> {
   for (const k of ALL_MIND_KEYS) {
     if (k in spec && !MIND_KEYS[role].includes(k)) {
       const owner = (Object.keys(MIND_KEYS) as MindRole[]).find((r) => MIND_KEYS[r].includes(k));
       c.err(`${p}.${k}`, `"${k}" belongs to ${owner} types, not ${role} types`);
     }
+  }
+  if (role === "trait") {
+    const raw = spec["distribution"];
+    if (raw === undefined) return {};
+    if (isObj(raw) && "histogram" in raw) {
+      c.keys(raw, `${p}.distribution`, ["histogram"]);
+      const bins = raw["histogram"];
+      const ok =
+        Array.isArray(bins) &&
+        bins.length > 0 &&
+        bins.every((b) => Array.isArray(b) && b.length === 3 && b.every((x) => typeof x === "number" && Number.isFinite(x)) && b[0] <= b[1] && b[2] >= 0);
+      if (!ok) {
+        c.err(`${p}.distribution.histogram`, "must be a list of [from, to, weight] bins, e.g. [[0, 0.1, 95], [0.6, 1, 5]]");
+        return {};
+      }
+      if ((bins as number[][]).every((b) => b[2] === 0)) c.err(`${p}.distribution.histogram`, "at least one bin needs a weight above 0");
+      return { distribution: { kind: "histogram", bins: bins as [number, number, number][] } };
+    }
+    const expr = numberSource(c, raw, `${p}.distribution`, ["self"]);
+    return expr ? { distribution: { kind: "expr", expr } } : {};
   }
   if (role === "need") {
     const start = spec["start"] === undefined ? { literal: 0 } : numberSource(c, spec["start"], `${p}.start`, ["self"]);
@@ -436,7 +503,7 @@ function checkAttrs(c: Checker, raw: unknown, path: string): Map<string, AttrDef
       c.err(p, `must be an object like { "type": "number" }`);
       continue;
     }
-    c.keys(spec, p, ["type", "default", "min", "max", "description"]);
+    c.keys(spec, p, ["type", "default", "min", "max", "regrow", "description"]);
     const type = spec["type"];
     if (typeof type !== "string" || !ATTR_TYPES.includes(type as AttrType)) {
       c.err(`${p}.type`, `must be one of ${ATTR_TYPES.join(", ")}`);
@@ -472,10 +539,16 @@ function checkAttrs(c: Checker, raw: unknown, path: string): Map<string, AttrDef
         c.err(`${p}.default`, `must be a ${attrType} or { "expr": "…" }`);
       }
     }
+    const regrow = spec["regrow"];
+    if (regrow !== undefined) {
+      if (attrType !== "number" || typeof regrow !== "number" || regrow <= 0) c.err(`${p}.regrow`, "must be a positive number (per day) on a number attribute");
+      else if (typeof max !== "number") c.err(`${p}.regrow`, `needs "max": regrowing stops there`);
+    }
     const description = c.optString(spec, "description", p);
     out.set(name, {
       name,
       type: attrType,
+      ...(typeof regrow === "number" && regrow > 0 && typeof max === "number" ? { regrow } : {}),
       ...(typeof min === "number" ? { min } : {}),
       ...(typeof max === "number" ? { max } : {}),
       ...(def ? { default: def } : {}),
@@ -492,6 +565,8 @@ interface PackParts {
   types: TypeDef[];
   edges: EdgeTypeDef[];
   reactions: Reaction[];
+  events: EventDef[];
+  place: PlaceDef[];
 }
 
 function checkOne(raw: unknown, index: number): { parts?: PackParts; errors: PackError[] } {
@@ -499,7 +574,7 @@ function checkOne(raw: unknown, index: number): { parts?: PackParts; errors: Pac
   const idRaw = raw["pack"];
   const id = typeof idRaw === "string" ? idRaw : `(pack #${index + 1})`;
   const c = new Checker(id);
-  c.keys(raw, "", ["pack", "version", "description", "requires", "types", "edges", "reactions"]);
+  c.keys(raw, "", ["pack", "version", "description", "requires", "types", "extends", "edges", "reactions", "events", "place"]);
 
   if (typeof idRaw !== "string" || !PACK_ID.test(idRaw)) {
     c.err("pack", `the pack id must be lowercase letters, digits and dashes, starting with a letter (e.g. "firearms")`);
@@ -654,15 +729,71 @@ function checkOne(raw: unknown, index: number): { parts?: PackParts; errors: Pac
     });
   }
 
+  const events: EventDef[] = [];
+  const rawEvents = raw["events"];
+  if (rawEvents !== undefined && !isObj(rawEvents)) c.err("events", "must be an object of event definitions");
+  for (const [name, spec] of Object.entries(isObj(rawEvents) ? rawEvents : {})) {
+    const ep = `events.${name}`;
+    if (!TYPE_NAME.test(name)) {
+      c.err(ep, "event names are PascalCase, e.g. Murder");
+      continue;
+    }
+    if (!isObj(spec)) {
+      c.err(ep, `must look like { "seenWithin": 6, "heard": "everyone" }`);
+      continue;
+    }
+    c.keys(spec, ep, ["seenWithin", "heard", "description"]);
+    const seenWithin = numberIn(c, spec, "seenWithin", ep, { min: 0, def: 6 });
+    const heard = spec["heard"] ?? "nobody";
+    if (heard !== "everyone" && heard !== "village" && heard !== "nobody") c.err(`${ep}.heard`, `must be "everyone", "village" or "nobody"`);
+    else if (seenWithin !== undefined) events.push({ name, pack: id, seenWithin, heard });
+  }
+
+  const place: PlaceDef[] = [];
+  const rawPlace = raw["place"];
+  if (rawPlace !== undefined && !isObj(rawPlace)) c.err("place", `must look like { "Bush": { "count": 60, "prefer": "fertility" } }`);
+  for (const [type, spec] of Object.entries(isObj(rawPlace) ? rawPlace : {})) {
+    const pp = `place.${type}`;
+    if (!isObj(spec)) {
+      c.err(pp, `must look like { "count": 60, "prefer": "fertility", "avoid": { "water": 0.05 } }`);
+      continue;
+    }
+    c.keys(spec, pp, ["count", "prefer", "avoid"]);
+    const count = numberIn(c, spec, "count", pp, { min: 0, int: true });
+    const prefer = spec["prefer"];
+    if (prefer !== undefined && typeof prefer !== "string") c.err(`${pp}.prefer`, "must be a field name");
+    const avoid: { field: string; above: number }[] = [];
+    const ra = spec["avoid"] ?? { water: 0.05 };
+    if (!isObj(ra) || Object.values(ra).some((v) => typeof v !== "number")) c.err(`${pp}.avoid`, `must look like { "water": 0.05 }`);
+    else for (const [f, v] of Object.entries(ra)) avoid.push({ field: f, above: v as number });
+    if (count !== undefined) place.push({ type, pack: id, count, ...(typeof prefer === "string" ? { prefer } : {}), avoid });
+  }
+
   if (c.errors.length) return { errors: c.errors };
-  return { parts: { id, version: version as string, requires, types, edges, reactions }, errors: [] };
+  return { parts: { id, version: version as string, requires, types, edges, reactions, events, place }, errors: [] };
 }
 
 /**
  * Archie's check: every pack on its own, then between packs (missing or circular
  * requirements, the same type defined twice). Returns a registry or every error found.
  */
-export function checkPacks(sources: readonly unknown[]): CheckResult {
+export function checkPacks(input: readonly unknown[]): CheckResult {
+  const pre = orderAndExtend(input);
+  if (pre.errors.length) return { ok: false, errors: pre.errors };
+  const result = checkOrdered(pre.sources);
+  if (result.ok || pre.changedBy.size === 0) return result;
+  // Point at the packs that changed a type, not only at its owner.
+  return {
+    ok: false,
+    errors: result.errors.map((e) => {
+      const m = /^types\.([A-Za-z0-9]+)/.exec(e.path);
+      const by = m ? pre.changedBy.get(m[1]!) : undefined;
+      return by ? { ...e, message: `${e.message} (${m![1]} was changed by: ${by.join(", ")})` } : e;
+    }),
+  };
+}
+
+function checkOrdered(sources: readonly unknown[]): CheckResult {
   const errors: PackError[] = [];
   const parts: PackParts[] = [];
   sources.forEach((s, i) => {
@@ -720,10 +851,25 @@ export function checkPacks(sources: readonly unknown[]): CheckResult {
   }
   if (errors.length) return { ok: false, errors };
   const reactions = ordered.flatMap((p) => p.reactions);
-  errors.push(...crossCheckMind(types), ...crossCheckEntityRules(types, edges), ...crossCheckBehaviour(types, edges, reactions));
+  const events = new Map<string, EventDef>();
+  for (const p of ordered) {
+    for (const e of p.events) {
+      const prev = events.get(e.name);
+      if (prev) errors.push({ pack: p.id, path: `events.${e.name}`, message: `event "${e.name}" is already defined by pack "${prev.pack}"` });
+      else events.set(e.name, e);
+    }
+  }
+  const place = new Map<string, PlaceDef>();
+  for (const p of ordered) for (const pl of p.place) place.set(pl.type, pl);
+  for (const pl of place.values()) {
+    const t = types.get(pl.type);
+    if (!t || t.kind !== "entity" || !t.leaf) errors.push({ pack: pl.pack, path: `place.${pl.type}`, message: `"${pl.type}" is not a leaf entity type; only leaves can be placed${suggest(pl.type, [...types.values()].filter((x) => x.leaf).map((x) => x.name))}` });
+  }
+  if (errors.length) return { ok: false, errors };
+  errors.push(...crossCheckMind(types), ...crossCheckEntityRules(types, edges), ...crossCheckBehaviour(types, edges, reactions, events));
   if (errors.length) return { ok: false, errors };
 
-  return { ok: true, registry: { packs: ordered.map((p) => ({ id: p.id, version: p.version })), types, edges, reactions } };
+  return { ok: true, registry: { packs: ordered.map((p) => ({ id: p.id, version: p.version })), types, edges, reactions, events, place } };
 }
 
 /** Names used inside mind expressions and `serves` must exist across all loaded packs. */
@@ -841,8 +987,23 @@ function checkTarget(c: Checker, raw: unknown, path: string): Target | undefined
       if (typeof raw["linked"] !== "string") return void c.err(`${path}.linked`, "must be an edge name");
       return { kind: "linked", edge: raw["linked"] };
     }
+    if ("person" in raw) {
+      c.keys(raw, path, ["person", "where", "within"]);
+      if (raw["person"] !== "nearest") c.err(`${path}.person`, `only "nearest" for now`);
+      const within = raw["within"] ?? 15;
+      if (typeof within !== "number" || within <= 0) return void c.err(`${path}.within`, "must be a distance in cells");
+      const where = raw["where"] === undefined ? undefined : condition(c, raw["where"], `${path}.where`, PERSON_WHERE_SCOPE);
+      return { kind: "person", within, ...(where ? { where } : {}) };
+    }
+    if ("field" in raw) {
+      c.keys(raw, path, ["field", "above"]);
+      if (typeof raw["field"] !== "string") return void c.err(`${path}.field`, "must be a field name");
+      const above = raw["above"] ?? 0.5;
+      if (typeof above !== "number") return void c.err(`${path}.above`, "must be a number");
+      return { kind: "field", field: raw["field"], above };
+    }
   }
-  c.err(path, `must be "home", "plan", "target", { "known": Type, "where": "..." }, { "explore": true }, { "wander": radius } or { "linked": edge }`);
+  c.err(path, `must be "home", "plan", "target", { "known": Type, "where": "..." }, { "explore": true }, { "wander": radius }, { "linked": edge }, { "person": "nearest", "where": "..." }, { "field": name, "above": 0.5 }, or a list of these`);
   return undefined;
 }
 
@@ -866,20 +1027,55 @@ function checkEffects(c: Checker, raw: unknown, path: string, scope: readonly st
         c.err(p, `must look like { "edge": "grudge", "to": "other" }`);
         continue;
       }
-      c.keys(v, p, ["edge", "to"]);
+      c.keys(v, p, ["edge", "to", "mutual", "add", "set"]);
       const to = checkRef(c, v["to"] ?? "target", `${p}.to`, scope);
-      if (to) out.push({ kind: key, edge: v["edge"], to });
+      const data = (k: "add" | "set"): Map<string, NumberSource> => {
+        const m = new Map<string, NumberSource>();
+        const d = v[k];
+        if (d === undefined) return m;
+        if (!isObj(d)) {
+          c.err(`${p}.${k}`, `must look like { "warmth": 1 }`);
+          return m;
+        }
+        for (const [f, x] of Object.entries(d)) {
+          const src = numberSource(c, x, `${p}.${k}.${f}`, scope);
+          if (src) m.set(f, src);
+        }
+        return m;
+      };
+      const add = data("add");
+      const set = data("set");
+      if (to) out.push({ kind: key, edge: v["edge"], to, mutual: v["mutual"] === true, add, set });
       continue;
     }
-    const [root, name, extra] = key.split(".");
-    if (!name || extra !== undefined || !["needs", "self", "target"].includes(root!)) {
-      c.err(p, `effect keys are "needs.<Need>", "self.<attr>", "target.<attr>", "link" or "unlink"`);
+    if (key === "kill") {
+      const who = checkRef(c, v, p, scope);
+      if (who) out.push({ kind: "kill", who });
+      continue;
+    }
+    if (key === "event") {
+      if (!isObj(v) || typeof v["name"] !== "string") {
+        c.err(p, `must look like { "name": "Murder", "about": "target" }`);
+        continue;
+      }
+      c.keys(v, p, ["name", "about"]);
+      const about = v["about"] === undefined ? undefined : checkRef(c, v["about"], `${p}.about`, scope);
+      out.push({ kind: "event", name: v["name"], ...(about ? { about } : {}) });
+      continue;
+    }
+    const parts = key.split(".");
+    const [root, a, b] = parts;
+    const who: Who | undefined = root === "needs" ? "self" : root === "self" || root === "target" || root === "other" ? root : undefined;
+    const isNeed = root === "needs" ? parts.length === 2 : a === "needs" && parts.length === 3;
+    const isSet = root !== "needs" && a !== "needs" && parts.length === 2;
+    if (!who || !(isNeed || isSet)) {
+      c.err(p, `effect keys are "needs.<Need>", "other.needs.<Need>", "target.needs.<Need>", "self.<attr>", "target.<attr>", "other.<attr>", "link", "unlink", "kill" or "event"`);
       continue;
     }
     const value = numberSource(c, v, p, scope);
     if (!value) continue;
-    if (root === "needs") out.push({ kind: "need", need: name, delta: value });
-    else out.push({ kind: "set", on: root as "self" | "target", attr: name, value });
+    if (isNeed) out.push({ kind: "need", on: who, need: root === "needs" ? a! : b!, delta: value });
+    else out.push({ kind: "set", on: who, attr: a!, value });
   }
   return out;
 }
@@ -898,8 +1094,10 @@ function checkSteps(c: Checker, raw: unknown, path: string): Step[] | undefined 
     const kind = main[0]!;
     if (kind === "goto") {
       c.keys(step, p, ["goto", "optional"]);
-      const target = checkTarget(c, step["goto"], `${p}.goto`);
-      if (target) out.push({ kind: "goto", target, optional: step["optional"] === true });
+      const raws = Array.isArray(step["goto"]) ? step["goto"] : [step["goto"]];
+      const targets = raws.map((r, j) => checkTarget(c, r, Array.isArray(step["goto"]) ? `${p}.goto[${j}]` : `${p}.goto`));
+      if (raws.length === 0) c.err(`${p}.goto`, "needs at least one target");
+      else if (targets.every((t) => t)) out.push({ kind: "goto", targets: targets as Target[], optional: step["optional"] === true });
     } else if (kind === "work") {
       c.keys(step, p, ["work", "progress"]);
       const duration = numberSource(c, step["work"], `${p}.work`, STEP_SCOPE);
@@ -953,41 +1151,60 @@ function checkMemory(c: Checker, raw: unknown, p: string): MemoryRule | undefine
 }
 
 /** Names inside steps, effects and reactions must exist across all loaded packs. */
-function crossCheckBehaviour(types: ReadonlyMap<string, TypeDef>, edges: ReadonlyMap<string, EdgeTypeDef>, reactions: readonly Reaction[]): PackError[] {
+function crossCheckBehaviour(
+  types: ReadonlyMap<string, TypeDef>,
+  edges: ReadonlyMap<string, EdgeTypeDef>,
+  reactions: readonly Reaction[],
+  events: ReadonlyMap<string, EventDef>,
+): PackError[] {
   const errors: PackError[] = [];
   const all = [...types.values()];
   const needs = all.filter((t) => t.role === "need").map((t) => t.name);
+  const traits = all.filter((t) => t.role === "trait").map((t) => t.name);
+  const edgeErr = (pack: string, path: string, name: string) =>
+    errors.push({ pack, path, message: `edge "${name}" is not defined${suggest(name, edges.keys())}` });
   const checkEffectList = (pack: string, path: string, effects: readonly Effect[]) => {
     effects.forEach((e) => {
       if (e.kind === "need" && !needs.includes(e.need)) errors.push({ pack, path: `${path}.needs.${e.need}`, message: `"${e.need}" is not a need type${suggest(e.need, needs)}` });
-      if ((e.kind === "link" || e.kind === "unlink") && !edges.has(e.edge)) errors.push({ pack, path: `${path}.${e.kind}`, message: `edge "${e.edge}" is not defined${suggest(e.edge, edges.keys())}` });
+      if ((e.kind === "link" || e.kind === "unlink") && !edges.has(e.edge)) edgeErr(pack, `${path}.${e.kind}`, e.edge);
+      if (e.kind === "event" && !events.has(e.name)) errors.push({ pack, path: `${path}.event`, message: `event "${e.name}" is not declared in any pack's "events"${suggest(e.name, events.keys())}` });
     });
   };
   const checkPaths = (pack: string, path: string, expr: Compiled | undefined) => {
     for (const ref of expr?.paths ?? []) {
       const [root, name = ""] = ref.split(".");
-      if (root === "rel" && !edges.has(name)) errors.push({ pack, path, message: `"${ref}": edge "${name}" is not defined${suggest(name, edges.keys())}` });
+      if ((root === "rel" || root === "bond" || root === "links") && !edges.has(name)) errors.push({ pack, path, message: `"${ref}": edge "${name}" is not defined${suggest(name, edges.keys())}` });
       if (root === "needs" && !needs.includes(name)) errors.push({ pack, path, message: `"${ref}": "${name}" is not a need type${suggest(name, needs)}` });
+      if (root === "traits" && !traits.includes(name)) errors.push({ pack, path, message: `"${ref}": "${name}" is not a trait type${suggest(name, traits)}` });
     }
   };
+  const sourcePaths = (pack: string, path: string, src: NumberSource | undefined) => {
+    if (src && "expr" in src) checkPaths(pack, path, src.expr);
+  };
   for (const t of all) {
+    if (t.need) sourcePaths(t.pack, `types.${t.name}.rate`, t.need.rate);
+    if (t.goal) sourcePaths(t.pack, `types.${t.name}.weight`, t.goal.weight);
+    for (const [g, src] of t.action?.serves ?? []) sourcePaths(t.pack, `types.${t.name}.serves.${g}`, src);
     t.action?.steps.forEach((s, i) => {
       const path = `types.${t.name}.steps[${i}]`;
-      if (s.kind === "goto" && s.target.kind === "known") {
-        const tt = types.get(s.target.type);
-        if (!tt?.memorable) {
-          errors.push({ pack: t.pack, path: `${path}.goto.known`, message: `"${s.target.type}" must be a memorable entity type (people go only to what they know)` });
-        } else {
-          for (const ref of s.target.where?.paths ?? []) {
-            const [root, name = ""] = ref.split(".");
-            if (root === "it" && !tt.remember.includes(name)) {
-              errors.push({ pack: t.pack, path: `${path}.goto.where`, message: `"${ref}": people don't remember "${name}" of ${tt.name}; add it to ${tt.name}.remember` });
+      if (s.kind === "goto") {
+        for (const target of s.targets) {
+          if (target.kind === "known") {
+            const tt = types.get(target.type);
+            if (!tt?.memorable) {
+              errors.push({ pack: t.pack, path: `${path}.goto.known`, message: `"${target.type}" must be a memorable entity type (people go only to what they know)` });
+            } else {
+              for (const ref of target.where?.paths ?? []) {
+                const [root, name = ""] = ref.split(".");
+                if (root === "it" && !tt.remember.includes(name)) {
+                  errors.push({ pack: t.pack, path: `${path}.goto.where`, message: `"${ref}": people don't remember "${name}" of ${tt.name}; add it to ${tt.name}.remember` });
+                }
+              }
             }
           }
+          if (target.kind === "linked" && !edges.has(target.edge)) edgeErr(t.pack, `${path}.goto.linked`, target.edge);
+          if (target.kind === "person") checkPaths(t.pack, `${path}.goto.where`, target.where);
         }
-      }
-      if (s.kind === "goto" && s.target.kind === "linked" && !edges.has(s.target.edge)) {
-        errors.push({ pack: t.pack, path: `${path}.goto.linked`, message: `edge "${s.target.edge}" is not defined${suggest(s.target.edge, edges.keys())}` });
       }
       if (s.kind === "effect") checkEffectList(t.pack, `${path}.effect`, s.effects);
       if (s.kind === "if") checkPaths(t.pack, `${path}.if`, s.cond);
@@ -1002,4 +1219,106 @@ function crossCheckBehaviour(types: ReadonlyMap<string, TypeDef>, edges: Readonl
     checkPaths(r.pack, `${path}.if`, r.cond);
   }
   return errors;
+}
+
+// ------------------------------------------------------------------ pack order and `extends` (ADR-0030)
+
+/**
+ * Before anything else: put packs in order (their given order, but always after
+ * what they require), then apply `extends` in that order, so when several packs
+ * change the same thing the later one wins. The result is a list of plain packs
+ * with merged type definitions, checked as usual.
+ */
+function orderAndExtend(input: readonly unknown[]): { sources: unknown[]; errors: PackError[]; changedBy: Map<string, string[]> } {
+  const errors: PackError[] = [];
+  const changedBy = new Map<string, string[]>();
+  const shells: { id: string; requires: string[]; raw: Obj }[] = [];
+  input.forEach((raw, i) => {
+    if (!isObj(raw) || typeof raw["pack"] !== "string") {
+      shells.push({ id: `(pack #${i + 1})`, requires: [], raw: isObj(raw) ? raw : {} });
+      return;
+    }
+    const req = Array.isArray(raw["requires"]) ? raw["requires"].filter((r): r is string => typeof r === "string") : [];
+    shells.push({ id: raw["pack"], requires: req, raw });
+  });
+  const byId = new Map(shells.map((s) => [s.id, s]));
+  const ordered: typeof shells = [];
+  const state = new Map<string, "visiting" | "done">();
+  const visit = (s: (typeof shells)[number]): void => {
+    if (state.get(s.id)) return;
+    state.set(s.id, "visiting");
+    for (const r of s.requires) {
+      const dep = byId.get(r);
+      if (dep && state.get(r) !== "visiting") visit(dep);
+    }
+    state.set(s.id, "done");
+    ordered.push(s);
+  };
+  for (const s of shells) visit(s);
+  // Missing requirements and cycles are reported later with full detail.
+
+  // Merge `extends` into the owners' type definitions, in order.
+  const owners = new Map<string, { pack: string; spec: Obj }>();
+  const merged = new Map<string, Map<string, Obj>>();
+  for (const s of ordered) {
+    const own = new Map<string, Obj>();
+    const types = isObj(s.raw["types"]) ? s.raw["types"] : {};
+    for (const [name, spec] of Object.entries(types)) {
+      if (!isObj(spec)) continue;
+      const copy = { ...spec };
+      own.set(name, copy);
+      if (!owners.has(name)) owners.set(name, { pack: s.id, spec: copy });
+    }
+    merged.set(s.id, own);
+    const ext = s.raw["extends"];
+    if (ext === undefined) continue;
+    if (!isObj(ext)) {
+      errors.push({ pack: s.id, path: "extends", message: `must look like { "Person": { "attrs": { ... } } }` });
+      continue;
+    }
+    for (const [name, change] of Object.entries(ext)) {
+      const owner = owners.get(name);
+      if (!owner) {
+        errors.push({ pack: s.id, path: `extends.${name}`, message: `there is no type "${name}" in a pack loaded before this one${suggest(name, owners.keys())}` });
+        continue;
+      }
+      if (!isObj(change)) {
+        errors.push({ pack: s.id, path: `extends.${name}`, message: "must be an object of the keys to change" });
+        continue;
+      }
+      if ("kind" in change && change["kind"] !== owner.spec["kind"]) {
+        errors.push({ pack: s.id, path: `extends.${name}.kind`, message: "the kind of a type can't be changed" });
+        continue;
+      }
+      const next = mergeSpec(owner.spec, change);
+      // Check the merged definition now, so problems are blamed on the extending pack.
+      const probe = checkOne({ pack: s.id, version: "0.0.0", types: { [name]: next } }, 0);
+      if (probe.errors.length) {
+        for (const e of probe.errors) errors.push({ pack: s.id, path: e.path.replace(`types.${name}`, `extends.${name}`), message: e.message });
+        continue;
+      }
+      for (const k of Object.keys(owner.spec)) delete owner.spec[k];
+      Object.assign(owner.spec, next);
+      changedBy.set(name, [...(changedBy.get(name) ?? []), s.id]);
+    }
+  }
+
+  const sources = ordered.map((s) => {
+    if (!isObj(s.raw) || !("types" in s.raw || "extends" in s.raw)) return s.raw;
+    const { extends: _e, ...rest } = s.raw;
+    const own = merged.get(s.id);
+    return own && own.size ? { ...rest, types: Object.fromEntries(own) } : rest;
+  });
+  return { sources, errors, changedBy };
+}
+
+/** Maps (attrs, serves, edge data, place) merge key by key; everything else is replaced. */
+function mergeSpec(base: Obj, change: Obj): Obj {
+  const out: Obj = { ...base };
+  for (const [k, v] of Object.entries(change)) {
+    const b = base[k];
+    if (["attrs", "serves"].includes(k) && isObj(b) && isObj(v)) out[k] = { ...b, ...v };
+    else out[k] = v;
+  }
+  return out;
 }

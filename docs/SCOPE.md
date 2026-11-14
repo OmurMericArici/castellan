@@ -53,13 +53,14 @@ New ideas go here, not into the current milestone. Each one gets a date and one 
 Moving an item into scope needs a decision record.
 
 - 2026-11-14 — Villages that merge, split or dissolve; houses that collapse when their condition hits zero; repair.
+- 2026-11-15 — Witnessed events as shared knowledge claims that spread by telling (today: Molly's witness/hears only).
+- 2026-11-15 — Justice: villagers acting together against a known killer (needs group actions).
 - 2026-11-14 — Lies pack: knowledge given wrong on purpose.
 - 2026-11-14 — Knowledge drift: claims degrading into variants over time or when retold (ties to Entropy).
 - 2026-11-14 — Adam assigns personalities (trait nodes) to people.
 - 2026-11-14 — Trade routes emerging from shared knowledge (merchants teaching others).
 - 2026-11-14 — Desire paths: routes people walk often wear into trails; Molly recognises and names them as roads.
 - 2026-11-14 — LLM workflow for writing packs (schema + examples + Archie's errors as feedback). First step: a blind test, a fresh LLM writing a pack from PACKS.md alone.
-- 2026-11-15 — Packs extending other packs' types (`extends`), e.g. hostility adding an attribute to Person.
 - 2026-11-13 — 3D voxel rendering as a homage to Minecraft castles.
 - 2026-11-13 — Castles: a settlement-scale pack where a castle emerges from towers, walls and a gate (the original idea).
 - 2026-11-13 — Vector-space synthesis (proposal/modulation kernels) from the old Synthesis Lab as an alternative actualizer for organic layouts.

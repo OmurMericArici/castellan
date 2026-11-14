@@ -8,13 +8,13 @@
  * leaves of a new leaf type at the start (on dry land).
  */
 import { readFileSync } from "node:fs";
-import { checkPacks, createSimulation, createWorld, formatPackError, genesis, isLazy, loadPacks, readLazy } from "../src/core";
+import { checkPacks, createSimulation, createWorld, formatPackError, genesis, isLazy, loadPacks, readLazy, withPackPlacement } from "../src/core";
 import type { LeafSpec, NoahConfig } from "../src/core";
 import CORE from "../src/packs/core.json";
 import SHELTER from "../src/packs/shelter.json";
 import HUNGER from "../src/packs/hunger.json";
 import HOSTILITY from "../src/packs/hostility.json";
-import { DEFAULT_NOAH, NOAH_HUNGER_LEAVES } from "../src/ui/noah-default";
+import { DEFAULT_NOAH } from "../src/ui/noah-default";
 
 const args = process.argv.slice(2);
 const files: string[] = [];
@@ -62,7 +62,7 @@ console.log(`✓ Archie accepts: ${check.registry.packs.map((p) => `${p.id} ${p.
 
 const world = createWorld(seed);
 loadPacks(world, [...defaults, ...user]);
-const config: NoahConfig = { ...DEFAULT_NOAH, leaves: [...DEFAULT_NOAH.leaves, ...NOAH_HUNGER_LEAVES, ...place] };
+const config: NoahConfig = withPackPlacement({ ...DEFAULT_NOAH, leaves: [...DEFAULT_NOAH.leaves, ...place] }, world.registry);
 try {
   genesis(world, config);
 } catch (e) {

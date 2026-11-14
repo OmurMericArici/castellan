@@ -1,5 +1,6 @@
 import { instantiateAttrs, requireType } from "./archie";
 import type { Attrs } from "./graph";
+import type { Registry } from "./packs";
 import { createRng, hash2, hashString } from "./rng";
 import type { SpaceSpec } from "./space";
 import { emit } from "./world";
@@ -71,4 +72,19 @@ export function genesis(world: World, config: NoahConfig): GenesisReport {
     report.placed.push({ type: spec.type, requested: spec.count, placed });
   });
   return report;
+}
+
+/**
+ * Noah's configuration with the packs' placement suggestions filled in (ADR-0029):
+ * leaves the config names keep the config's numbers; leaves only a pack suggests
+ * are added; leaves of types no loaded pack defines are dropped.
+ */
+export function withPackPlacement(config: NoahConfig, registry: Registry): NoahConfig {
+  const known = (t: string) => registry.types.get(t)?.leaf === true;
+  const leaves = config.leaves.filter((l) => known(l.type));
+  for (const p of registry.place.values()) {
+    if (leaves.some((l) => l.type === p.type)) continue;
+    leaves.push({ type: p.type, count: p.count, ...(p.prefer ? { prefer: p.prefer } : {}), avoid: [...p.avoid] });
+  }
+  return { ...config, leaves };
 }

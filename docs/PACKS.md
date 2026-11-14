@@ -10,7 +10,7 @@ This page is the whole contract, written so a person *or an LLM* can write a
 valid pack from it. Archie checks every pack before it loads and explains each
 problem with its exact place, so a failed pack can be fixed from the error alone.
 
-Format version: **0.4** (M5): actions are step programs; reactions; memory rules.
+Format version: **0.5**: adds `extends`, `place`, `events`, traits with distributions, death, bonds with numbers, field targets, regrowing attributes, randomness in steps and reactions.
 
 ## Shape
 
@@ -35,9 +35,33 @@ Format version: **0.4** (M5): actions are step programs; reactions; memory rules
 | `types` | no | type definitions, by name (PascalCase) |
 | `edges` | no | edge type definitions, by name (camelCase) |
 | `reactions` | no | rules that fire when something happens to a person |
+| `extends` | no | changes to types defined by packs loaded earlier (see Extending) |
+| `place` | no | how many of a leaf Noah places at the start, e.g. `{ "Bush": { "count": 70, "prefer": "fertility", "avoid": { "water": 0.05 } } }` |
+| `events` | no | named world events this pack can raise (see Events) |
 
 Unknown keys are errors, with a "did you mean" hint. A type or edge name can be
-defined by only one pack; packs can't change another pack's types (yet).
+defined by only one pack; to change someone else's type, use `extends`.
+
+### Order, and turning packs on and off
+
+Packs load in the order you give (in the demo: the pack list at the bottom of the
+page; `?packs=core,shelter,…` in the URL), but always after the packs they
+`require`. A pack whose requirement is turned off is an error. When several packs
+change the same thing with `extends`, **the one loaded later wins**.
+
+### Extending
+
+```json
+"extends": {
+  "Person": { "attrs": { "stash": { "type": "number", "default": 0 } } },
+  "Survive": { "weight": "max(needs.Fear, needs.Dread)" },
+  "Forage": { "serves": { "Eat": "if(needs.Hunger > 0.5, 1, 0)" } }
+}
+```
+
+`attrs` and `serves` are merged key by key; any other key (`weight`, `rate`,
+`steps`, `distribution`, …) is replaced. The kind of a type can't change. Errors
+in an extension are reported against the extending pack.
 
 ## What `core` gives you
 
@@ -55,6 +79,7 @@ Always loaded with `core`; you may `require` and use them.
 | `shelter` | need `Shelter`, goal `Secure` (tier 2), actions `Scout`, `Gather` (wood into `Person.carrying`), `Deliver` (`carrying` → the site's `stock`), `Build`; entities `House` (build rule) and `Village` (recognised); edges `builds`, `livesIn`, `memberOf`. `home` and `plan.*` come from it. |
 | `hunger` | leaf `Bush` (memorable, remembers `food`, spreads), need `Hunger`, goal `Eat` (tier 1), actions `Forage` (eat one `food` on the spot, Hunger −0.4) and `SeekFood` |
 | `hostility` | need `Anger`, goal `Vent` (tier 3), action `Confront`, edge `grudge` (person → person), reactions on `found-empty` and `meets` |
+| `psychopathy` | trait `Psychopathy` (rare), needs `Bloodlust`, `Dread`, goal `Prey`, actions `Murder`, `Hide`, edge `hates`, event `Murder`; extends `Survive` |
 
 Note: `Person.carrying` is shared. Shelter's `Deliver` gives whatever is carried to a building site, so a pack that also uses `carrying` for something else will mix with wood.
 
@@ -68,6 +93,7 @@ Note: `Person.carrying` is shared. Shelter's `Deliver` gives whatever is carried
 | `remember` | memorable entities: attributes people notice and remember, readable later as `it.<attr>`. Memory can be out of date. |
 | `memory` | knowledge types: how well people remember (see Memory) |
 | `role` | mind types, required: `need`, `goal`, `action` or `trait` |
+| `distribution` | traits: how values are spread over people (see Traits) |
 | `attrs` | attribute definitions (see Attributes) |
 | `build`, `recognize`, `spread` | entity rules (see Entity rules) |
 | `description` | free text |
@@ -95,13 +121,38 @@ or an expression: `"needs.Hunger * 2"` (or `{ "expr": "…" }`).
 | `night` | true from dusk (21:00) to dawn (06:00) |
 | `doing` | name of their current action |
 | `self.age`, `self.id` | the person's attributes and id |
+| `traits.Psychopathy` | the person's value of a trait (fixed for life) |
+| `links.grudge` | how many edges of that type the person has to living others |
+| `field.water` | a field's value where the person stands |
 | `plan.active`, `plan.missing`, `plan.ready`, `plan.workLeft` | their building project: whatever they are building under any `build` rule (one at a time) |
 | `home` | true once they live in something they built |
 | `target.<attr>`, `target.id` | inside steps: what the action is aimed at (its real state, they are there) |
 | `it.<attr>` | in `where`: what the person **remembers** of a thing (only `remember`ed attributes); in reactions: the thing's **real** attributes |
-| `other.<attr>`, `other.id` | in reactions to `meets`: the other person |
-| `rel.<edge>` | in reactions to `meets`: true if the person has that edge to the other |
+| `other.<attr>`, `other.id` | in reactions: the other person (`meets`; the actor of a `witness`/`hears` event) |
+| `rel.<edge>` | true if the person has that edge to the other person (reactions; `person` targets) |
+| `bond.<edge>.<field>` | the person's own data on that edge to the other person or target (0 if none) |
 | `action` | in reactions to `finished`: the action that ended |
+| `event.name`, `event.known` | in `witness`/`hears`: which event, and whether the culprit is known |
+
+Random functions (`rand()`, `rand_range`, `rand_int`, `pick`) also work in steps,
+effects and reactions (seeded, so worlds stay reproducible), not in `serves`,
+`weight` or `rate`.
+
+## Traits
+
+A trait is a fixed personal value, drawn once per person by Adam from a
+distribution the pack gives:
+
+```json
+"Psychopathy": { "kind": "mind", "role": "trait",
+  "distribution": { "histogram": [[0, 0.1, 88], [0.1, 0.5, 9], [0.75, 1, 3]] } }
+```
+
+- `histogram`: bins `[from, to, weight]`; a bin is picked by weight, then a value uniformly inside it.
+- or a generating function: `"distribution": "if(rand() < 0.03, rand_range(0.75, 1), rand_range(0, 0.1))"`.
+
+Read it as `traits.Psychopathy` in any expression (a need's `rate`, a goal's
+`weight`, …). Another pack can change the distribution with `extends`.
 
 ## Steps
 
@@ -116,7 +167,13 @@ instant.
 | | `{ "goto": { "explore": true } }` | toward the unknown |
 | | `{ "goto": { "wander": 6 } }` | a short stroll within that radius (around home if near) |
 | | `{ "goto": { "linked": "grudge" } }` | to the nearest person they have that edge to |
+| | `{ "goto": { "person": "nearest", "within": 25, "where": "not rel.friend" } }` | to the nearest living person in range matching `where` (`it` = them, `rel`, `bond`) |
+| | `{ "goto": { "field": "water", "above": 0.5 } }` | to the nearest walkable spot at the edge of where a field is high (a lake shore) |
+| | `{ "goto": [ {…}, {…} ] }` | alternatives: the first one with somewhere to go is used |
 | | `"optional": true` | if there is nowhere to go, skip instead of ending the action |
+
+Walking to a person who moves: on arrival, if they are no longer there, the
+person follows again (up to three times), then gives up.
 | `work` | `{ "work": 0.04 }` | stay busy for that many days; `"progress": "worked"` adds the time spent to that attribute of the target, even if interrupted |
 | `take` | `{ "take": { "from": "food", "to": "carrying", "amount": 1 } }` | move up to `amount` from the target's attribute to the person's (`to` may be left out: used up at once). If the target has none, the person **finds it empty**: their memory is updated and the `found-empty` reaction fires. The engine records `lastTakenBy` on the target. |
 | `give` | `{ "give": { "from": "carrying", "to": "stock", "amount": "self.carrying" } }` | move from the person's attribute to the target's |
@@ -129,10 +186,9 @@ When the last step is done the action ends and the person chooses again.
 
 What ends an action early: a `goto` with nowhere to go (unless `optional`), a
 `take` that finds nothing, a failing `if`. The person then chooses again at once.
-**Choosing can't see whether a `goto` will find a target**, so make `serves`
-depend on something visible (`knows.Bush > 0`, a need, `self.<attr>`) or the
-person may keep picking an action that ends immediately. The engine stops such
-loops after three tries at the same moment by having the person wait.
+**An action whose first step is a `goto` with nowhere to go is not a choice at
+all**, so a friendless person won't keep picking "visit a friend". If actions still
+end instantly over and over, the engine pauses the person briefly.
 
 Steps and effects may read and write attributes a type does not declare (the
 engine stores them), but declare them anyway so others know they exist.
@@ -145,10 +201,12 @@ Used by the `effect` step and by reactions. Keys:
 | Key | Value | Does |
 |---|---|---|
 | `"needs.<Need>"` | number or expression | **adds** to the person's need (use a negative number to lower it) |
-| `"self.<attr>"` | number or expression | sets the person's attribute |
-| `"target.<attr>"` | number or expression | sets the target's attribute (in reactions: the thing involved) |
-| `"link"` | `{ "edge": "grudge", "to": "other" }` | adds an edge from the person; `to` is `"target"`, `"other"`, or an expression giving a node id, e.g. `"it.lastTakenBy"` |
-| `"unlink"` | same | removes it |
+| `"other.needs.<Need>"`, `"target.needs.<Need>"` | number or expression | adds to the other person's / the target person's need |
+| `"self.<attr>"`, `"target.<attr>"`, `"other.<attr>"` | number or expression | sets that attribute (in reactions `target` is the thing involved) |
+| `"link"` | `{ "edge": "friend", "to": "other", "mutual": true, "add": { "warmth": 1 } }` | adds an edge from the person if missing; `to` is `"target"`, `"other"`, or an id expression (`"it.lastTakenBy"`); `mutual` also adds it back from them; `add` / `set` change the edge's data on each side |
+| `"unlink"` | `{ "edge": "friend", "to": "other", "mutual": true }` | removes it |
+| `"kill"` | `"target"`, `"other"` or an id expression | the person dies: they stay in the world's history but stop acting |
+| `"event"` | `{ "name": "Murder", "about": "target" }` | raises a world event declared under `events`; Molly decides who notices |
 
 ## Reactions
 
@@ -165,12 +223,25 @@ A reaction runs effects when something happens to a person.
 | `found-empty` | a `take` found nothing where they remembered something | `it` |
 | `finished` | an action ended normally | `action` |
 | `dusk`, `dawn` | Molly's day signals | |
+| `witness` | they saw an event happen (within its `seenWithin`) | `it` (who/what it was about), `other` (who did it), `event` |
+| `hears` | they heard of an event (per its `heard` rule) | `it`, `event`; `other` only if someone saw who did it (`event.known`) |
 
 All reactions for an event run in pack load order, and each sees the effects of
 the ones before it (an edge added by the first is visible to `rel.*` in the
 second). A `meets` happens when someone starts walking and will pass within
 sight of another person; the same pair meets at most once every 0.5 days, so
 people standing together don't meet over and over.
+
+## Events
+
+```json
+"events": { "Murder": { "seenWithin": 7, "heard": "everyone" } }
+```
+
+An `event` effect raises it. Molly records it in the history (with who saw it),
+then: people within `seenWithin` cells get `witness`; everyone else gets `hears`
+if `heard` is `"everyone"`, or only people of the same village if `"village"`
+(`"nobody"`: no one else).
 
 ## Memory
 
@@ -221,6 +292,7 @@ ground, so `"field": "water"` means the shore.
 | `type` | `number`, `string` or `boolean` |
 | `min`, `max` | numbers only; values outside are clamped |
 | `default` | a literal, or `{ "expr": "…" }` evaluated once at creation (`pick("Ayla", "Bora")` for text) |
+| `regrow` | entity number attributes with a `max`: amount regained per day (Entropy), e.g. berries |
 | `description` | free text |
 
 ## Edges
@@ -240,7 +312,7 @@ ground, so `"field": "water"` means the shore.
 | Comparison | `== !=` (any values), `< <= > >=` (numbers) |
 | Logic | `and`, `or`, `not` |
 | Functions | `min`, `max`, `clamp(x, lo, hi)`, `lerp(a, b, t)`, `abs`, `floor`, `ceil`, `round`, `sqrt`, `if(cond, a, b)` |
-| Random | `rand()`, `rand_range(a, b)`, `rand_int(a, b)`, `pick(a, b, …)`: only in attribute defaults and need `start` |
+| Random | `rand()`, `rand_range(a, b)`, `rand_int(a, b)`, `pick(a, b, …)`: in attribute defaults, need `start`, trait `distribution`, steps, effects and reactions |
 
 Limits: 500 characters, nesting depth 48, 10 000 steps.
 
@@ -252,4 +324,4 @@ Limits: 500 characters, nesting depth 48, 10 000 steps.
 4. Reactions for what should happen on its own (anger on meeting someone, a grudge when a tree is found empty).
 5. Load it; fix whatever Archie reports, using the paths in its messages.
 
-`src/packs/core.json` and `src/packs/shelter.json` are the reference examples.
+`src/packs/*.json` are the reference examples; `examples/blind/` has packs written by outside authors from this page alone. Try a pack with `npm run check-pack -- my-pack.json` (`--help` for options).

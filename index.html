@@ -9,7 +9,7 @@
   <body>
     <header>
       <h1>Castellan</h1>
-      <p>A node-based world builder. Milestone M5: all behaviour comes from packs. People explore, forage, build houses that become named villages, hold grudges and remember imperfectly. Click a person to follow them.</p>
+      <p>A node-based world builder. Everything people do comes from packs: they explore, forage, build houses that become named villages, hold grudges, remember imperfectly, and, rarely, one of them kills. Click a person to follow them; change the packs at the bottom.</p>
     </header>
     <main>
       <div class="controls">
@@ -42,6 +42,12 @@
         <span class="ring"></span> known to the selected person
       </p>
       <section id="person" aria-live="polite"></section>
+      <details id="pack-manager">
+        <summary>Packs: turn them on or off, change their order</summary>
+        <p class="hint">Packs load top to bottom; when two packs change the same thing, the lower one wins. A pack always loads after the packs it requires.</p>
+        <ol id="pack-list"></ol>
+        <button id="apply-packs" type="button">Apply and restart the world</button>
+      </details>
     </main>
     <script type="module" src="./src/ui/main.ts"></script>
   </body>

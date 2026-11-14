@@ -3,6 +3,21 @@
 Newest first. One entry per session: what changed, what was learned, what's next.
 Add a screenshot/GIF path whenever something is visible.
 
+## 2026-11-15 — All primitives, traits, murder, pack order
+
+- Built all nine ADR-0029 primitives: un-startable actions aren't choices; bond data on edges (read, add,
+  set, mutual); field targets (lake shores) and field values where people stand; `extends` with
+  order-based overrides; regrowing attributes; randomness in steps and reactions; effects on the other
+  person; goto alternatives; link counts.
+- ADR-0030: traits drawn by Adam from a histogram or generating function; `kill` (death); world events
+  that Molly notices (witnesses vs those who hear); pack `place` suggestions; enable/disable/order packs
+  (demo: pack list at the bottom, `?packs=` in the URL).
+- New default pack `psychopathy`. With a raised rate (via `extends`), seed 1: Tuna (psychopathy 1.00)
+  stalks and kills Yaz on day 3 and Vera on day 5, unseen; the village hears, dreads and hides.
+- Found while probing: killers struck at a victim's old position (now: chase moving targets); a guard
+  that left people waiting forever; shore targets on dry cells; performance (knowledge cached per log length).
+- 62 tests. ADR-0031. PACKS.md format 0.5.
+
 ## 2026-11-15 — Blind pack test
 
 - New tool: `npm run check-pack -- pack.json` (Archie + a short simulation + runtime warnings).

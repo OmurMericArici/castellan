@@ -15,13 +15,37 @@ export class Entropy {
   readonly handlers: ReadonlyMap<string, Handler>;
 
   constructor(private readonly world: World) {
-    this.handlers = new Map<string, Handler>([["entropy.spread", (_w, d) => this.spread((d as { type: string }).type)]]);
+    this.handlers = new Map<string, Handler>([
+      ["entropy.spread", (_w, d) => this.spread((d as { type: string }).type)],
+      ["entropy.regrow", () => this.regrow()],
+    ]);
   }
 
   start(): void {
     for (const t of this.world.registry.types.values()) {
       if (t.spread) schedule(this.world, this.world.time + t.spread.every, { handler: "entropy.spread", data: { type: t.name } });
     }
+    if (this.regrowing().length) schedule(this.world, this.world.time + 1, { handler: "entropy.regrow" });
+  }
+
+  private regrowing(): { type: string; attr: string; rate: number; max: number }[] {
+    const out: { type: string; attr: string; rate: number; max: number }[] = [];
+    for (const t of this.world.registry.types.values()) {
+      for (const a of t.attrs.values()) if (a.regrow && a.max !== undefined) out.push({ type: t.name, attr: a.name, rate: a.regrow, max: a.max });
+    }
+    return out;
+  }
+
+  /** Once a day, attributes with a `regrow` rate come back toward their max (berries, springs). */
+  private regrow(): void {
+    const w = this.world;
+    for (const r of this.regrowing()) {
+      for (const n of w.graph.nodes({ kind: "entity", type: r.type })) {
+        const v = typeof n.attrs[r.attr] === "number" ? (n.attrs[r.attr] as number) : r.max;
+        if (v < r.max) emit(w, "entropy", { kind: "node.attrs", id: n.id, attrs: { [r.attr]: Math.min(r.max, v + r.rate) } });
+      }
+    }
+    schedule(w, w.time + 1, { handler: "entropy.regrow" });
   }
 
   /** Condition starts falling once something is finished. A lazy value: no ticking. */

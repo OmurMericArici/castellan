@@ -65,3 +65,4 @@ even while the record is still proposed.
 | 0028 | [Behaviour engine in M5: how steps, reactions and memory were built](0028-behaviour-engine-m5.md) | accepted (technical) |
 | 0029 | [Blind pack test: results and the missing primitives](0029-blind-test-gaps.md) | accepted |
 | 0030 | [Traits with distributions, world events, death, pack order and overrides](0030-traits-events-pack-order.md) | accepted |
+| 0031 | [How ADR-0029/0030 were built](0031-primitives-built.md) | accepted (technical) |

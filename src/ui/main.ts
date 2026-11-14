@@ -1,10 +1,7 @@
-import { clockLabel, createSimulation, createWorld, DEFAULT_ADAM, genesis, isNight, loadPacks } from "../core";
+import { clockLabel, createSimulation, createWorld, DEFAULT_ADAM, genesis, isNight, loadPacks, withPackPlacement } from "../core";
 import type { NodeId } from "../core";
-import CORE from "../packs/core.json";
-import SHELTER from "../packs/shelter.json";
-import HUNGER from "../packs/hunger.json";
-import HOSTILITY from "../packs/hostility.json";
-import { DEFAULT_NOAH, NOAH_HUNGER_LEAVES } from "./noah-default";
+import { DEFAULT_NOAH } from "./noah-default";
+import { AVAILABLE, packOrderFromUrl, sourcesFor } from "./packs";
 import { drawWorld, renderSpace } from "./render";
 import { StoryBook } from "./story";
 
@@ -29,9 +26,14 @@ const params = new URLSearchParams(location.search);
 const seed = Number(params.get("seed") ?? 1) >>> 0;
 $<HTMLElement>("#seed").textContent = String(seed);
 
+// ---------------------------------------------------------------- packs: enable, disable, order (ADR-0030)
+
+const order = packOrderFromUrl(params);
+renderPackManager(order);
+
 const world = createWorld(seed);
 try {
-  loadPacks(world, [CORE, SHELTER, HUNGER, HOSTILITY]);
+  loadPacks(world, sourcesFor(order));
 } catch (e) {
   // Archie's message lists every problem with its place in the pack.
   summary.textContent = e instanceof Error ? e.message : String(e);
@@ -39,11 +41,57 @@ try {
   throw e;
 }
 $<HTMLElement>("#packs").textContent = world.registry.packs.map((p) => `${p.id} ${p.version}`).join(", ");
-genesis(world, { ...DEFAULT_NOAH, leaves: [...DEFAULT_NOAH.leaves, ...NOAH_HUNGER_LEAVES] });
+genesis(world, withPackPlacement(DEFAULT_NOAH, world.registry));
 const sim = createSimulation(world);
 sim.start();
 const space = world.space!;
 const story = new StoryBook();
+
+function go(next: { seed?: number; packs?: string[] }): void {
+  const q = new URLSearchParams();
+  q.set("seed", String(next.seed ?? seed));
+  const packs = next.packs ?? order;
+  if (packs.join(",") !== "core,shelter,hunger,hostility,psychopathy") q.set("packs", packs.join(","));
+  location.search = `?${q.toString()}`;
+}
+
+function renderPackManager(current: string[]): void {
+  const list = $<HTMLOListElement>("#pack-list");
+  let working = [...current];
+  const draw = () => {
+    const rest = AVAILABLE.map((p) => p.id).filter((id) => !working.includes(id));
+    list.innerHTML = "";
+    for (const id of [...working, ...rest]) {
+      const p = AVAILABLE.find((x) => x.id === id)!;
+      const on = working.includes(id);
+      const li = document.createElement("li");
+      li.className = on ? "" : "off";
+      li.innerHTML = `
+        <label><input type="checkbox" ${on ? "checked" : ""} ${id === "core" ? "disabled" : ""}> <strong>${id}</strong>${p.example ? ' <span class="tag">blind test</span>' : ""}</label>
+        <span class="hint">${p.description}</span>
+        <span class="move">${on ? '<button type="button" data-up>↑</button><button type="button" data-down>↓</button>' : ""}</span>`;
+      li.querySelector("input")!.addEventListener("change", (ev) => {
+        working = (ev.target as HTMLInputElement).checked ? [...working, id] : working.filter((x) => x !== id);
+        draw();
+      });
+      li.querySelector("[data-up]")?.addEventListener("click", () => {
+        const i = working.indexOf(id);
+        if (i > 0) [working[i - 1], working[i]] = [working[i]!, working[i - 1]!];
+        draw();
+      });
+      li.querySelector("[data-down]")?.addEventListener("click", () => {
+        const i = working.indexOf(id);
+        if (i < working.length - 1) [working[i + 1], working[i]] = [working[i]!, working[i + 1]!];
+        draw();
+      });
+      list.append(li);
+    }
+  };
+  draw();
+  $<HTMLButtonElement>("#apply-packs").addEventListener("click", () => go({ packs: working }));
+}
+
+// ---------------------------------------------------------------- canvas
 
 canvas.width = space.width * SCALE;
 canvas.height = space.height * SCALE;
@@ -58,9 +106,7 @@ for (const name of space.fields.keys()) {
 }
 let base = renderSpace(space, "terrain");
 viewSelect.addEventListener("change", () => (base = renderSpace(space, viewSelect.value)));
-newSeedButton.addEventListener("click", () => {
-  location.search = `?seed=${Math.floor(Math.random() * 1_000_000)}`;
-});
+newSeedButton.addEventListener("click", () => go({ seed: Math.floor(Math.random() * 1_000_000) }));
 
 let selected: NodeId | undefined = sim.adam.people()[0]?.id;
 canvas.addEventListener("click", (ev) => {
@@ -68,25 +114,52 @@ canvas.addEventListener("click", (ev) => {
   const x = ((ev.clientX - rect.left) / rect.width) * space.width;
   const y = ((ev.clientY - rect.top) / rect.height) * space.height;
   let best: { id: NodeId; d: number } | undefined;
-  for (const p of sim.adam.people()) {
-    const pos = sim.adam.positionOf(p.id)!;
+  for (const p of world.graph.nodes({ kind: "entity", type: "Person" })) {
+    const pos = sim.adam.positionOf(p.id);
+    if (!pos) continue;
     const d = Math.hypot(pos.x - x, pos.y - y);
     if (d < 4 && (!best || d < best.d)) best = { id: p.id, d };
   }
   if (best) selected = best.id;
 });
 
-const LABEL: Record<string, string> = { Explore: "exploring", Wander: "wandering", Rest: "resting", Scout: "scouting for trees", Gather: "gathering wood", Deliver: "carrying wood to the site", Build: "building", Forage: "foraging", SeekFood: "looking for food", Confront: "confronting someone" };
+// ---------------------------------------------------------------- person panel
+
+const LABEL: Record<string, string> = {
+  Explore: "exploring",
+  Wander: "wandering",
+  Rest: "resting",
+  Scout: "scouting for trees",
+  Gather: "gathering wood",
+  Deliver: "carrying wood to the site",
+  Build: "building",
+  Forage: "foraging",
+  SeekFood: "looking for food",
+  Confront: "confronting someone",
+  Hide: "hiding at home",
+  Murder: "stalking someone",
+};
+
+const nameOf = (id: NodeId | undefined) => (id === undefined ? "someone" : String(world.graph.node(id)?.attrs["name"] ?? "someone"));
+const linksOf = (id: NodeId, edge: string) =>
+  world.graph
+    .edgesOf(id, edge)
+    .filter((e) => e.from === id)
+    .map((e) => nameOf(e.to));
 
 function renderPanel(): void {
   if (selected === undefined) return;
   const p = world.graph.node(selected);
   if (!p) return;
+  const dead = p.attrs["dead"] === true;
   const doing = world.activities.get(selected)?.action;
   const needs = sim.adam.needLevels(selected);
-  const bars = Object.entries(needs)
-    .map(([n, v]) => `<div class="need"><span>${n}</span><meter min="0" max="1" low="0.4" high="0.7" optimum="0" value="${v.toFixed(3)}"></meter></div>`)
-    .join("");
+  const traits = Object.entries(sim.adam.traits(selected)).map(([k, v]) => `${k.toLowerCase()} ${v.toFixed(2)}`);
+  const bars = dead
+    ? ""
+    : Object.entries(needs)
+        .map(([n, v]) => `<div class="need"><span>${n}</span><meter min="0" max="1" low="0.4" high="0.7" optimum="0" value="${v.toFixed(3)}"></meter></div>`)
+        .join("");
   const lines = story.lines(selected).map((l) => `<li>${l}</li>`).join("");
   const home = world.graph.edgesOf(selected, "livesIn").find((e) => e.from === selected);
   const village = home ? world.graph.edgesOf(home.to, "memberOf").map((e) => world.graph.node(e.to))[0] : undefined;
@@ -97,18 +170,23 @@ function renderPanel(): void {
     : plan
       ? `building a house: ${String(plan.attrs["stock"])}/10 wood at the site${carrying ? `, carrying ${carrying}` : ""}`
       : "no home yet";
-  const grudges = world.graph
-    .edgesOf(selected, "grudge")
-    .filter((e) => e.from === selected)
-    .map((e) => String(world.graph.node(e.to)?.attrs["name"] ?? "someone"));
-  const grudgeLine = grudges.length ? ` · holds a grudge against ${grudges.join(", ")}` : "";
+  const relations = [
+    ...linksOf(selected, "grudge").map((n) => `holds a grudge against ${n}`),
+    ...linksOf(selected, "hates").map((n) => `hates ${n}`),
+    ...linksOf(selected, "friend").map((n) => `friends with ${n}`),
+  ];
+  const death = world.log.find((l) => l.event.kind === "died" && l.event.id === selected);
+  const status = dead && death?.event.kind === "died" ? `<p class="error">Died ${clockLabel(death.t)}${death.event.by !== undefined ? `, killed by ${nameOf(death.event.by)}` : ""}.</p>` : "";
   panel.innerHTML = `
-    <h2>${String(p.attrs["name"] ?? `Person ${p.id}`)}</h2>
-    <p class="hint">${String(p.attrs["age"])} years · determination ${String(p.attrs["determination"])} · ${doing ? LABEL[doing] ?? doing : "—"} · knows ${sim.adam.knownCount(selected)} things</p>
-    <p class="hint">${homeLine}${grudgeLine}</p>
+    <h2>${String(p.attrs["name"] ?? `Person ${p.id}`)}${dead ? " †" : ""}</h2>
+    ${status}
+    <p class="hint">${String(p.attrs["age"])} years · determination ${String(p.attrs["determination"])}${traits.length ? ` · ${traits.join(", ")}` : ""}${dead ? "" : ` · ${doing ? (LABEL[doing] ?? doing) : "—"}`} · knows ${sim.adam.knownCount(selected)} things</p>
+    <p class="hint">${homeLine}${relations.length ? ` · ${relations.join(" · ")}` : ""}</p>
     <div class="needs">${bars}</div>
     <ol class="story">${lines}</ol>`;
 }
+
+// ---------------------------------------------------------------- loop
 
 let last = performance.now();
 let lastPanel = 0;
@@ -129,10 +207,11 @@ function frame(now: number): void {
     const houses = [...world.graph.nodes({ type: "House" })];
     const builtCount = houses.filter((h) => h.attrs["state"] === "built").length;
     const villages = [...world.graph.nodes({ type: "Village" })].map((v) => String(v.attrs["name"]));
+    const deaths = world.log.filter((l) => l.event.kind === "died").length;
     summary.textContent =
-      `${sim.adam.people().length} people · ${builtCount} houses built, ${houses.length - builtCount} being built` +
+      `${sim.adam.people().length} people alive${deaths ? `, ${deaths} dead` : ""} · ${builtCount} houses built, ${houses.length - builtCount} being built` +
       (villages.length ? ` · villages: ${villages.join(", ")}` : "") +
-      ` · ${[...world.graph.nodes({ type: "Sighting" })].length} shared sightings · ${world.log.length} events`;
+      ` · ${world.log.length} events`;
     warningsBox.hidden = sim.adam.warnings.length === 0;
     warningsBox.textContent = sim.adam.warnings.length ? `Pack rules that failed and were skipped:\n${sim.adam.warnings.join("\n")}` : "";
     lastPanel = now;

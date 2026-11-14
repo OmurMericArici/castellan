@@ -1,0 +1,71 @@
+{
+  "pack": "psychopathy",
+  "version": "0.1.0",
+  "description": "A rare trait. In the few who have it strongly, an urge to kill grows until they act. A murder is noticed: witnesses know who did it and hate them; everyone else hears of it and is afraid. Dread sends people home and makes them avoid going out.",
+  "requires": ["core", "hostility"],
+  "types": {
+    "Psychopathy": {
+      "kind": "mind",
+      "role": "trait",
+      "description": "How little someone feels for others. Most people: almost none; a few: a lot.",
+      "distribution": { "histogram": [[0, 0.1, 88], [0.1, 0.5, 9], [0.75, 1, 3]] }
+    },
+    "Bloodlust": {
+      "kind": "mind",
+      "role": "need",
+      "description": "The urge to kill. Grows only in people with strong psychopathy; killing quiets it for a while.",
+      "start": 0,
+      "rate": "if(traits.Psychopathy > 0.7, traits.Psychopathy * 0.35, -0.2)",
+      "urgentAt": 0.8
+    },
+    "Dread": {
+      "kind": "mind",
+      "role": "need",
+      "description": "Fear of a killer among them. Fades slowly over days.",
+      "start": 0,
+      "rate": -0.15,
+      "urgentAt": 0.6
+    },
+    "Prey": {
+      "kind": "mind",
+      "role": "goal",
+      "tier": 2,
+      "weight": "needs.Bloodlust",
+      "description": "The killer's goal."
+    },
+    "Murder": {
+      "kind": "mind",
+      "role": "action",
+      "description": "Go to the nearest person and kill them.",
+      "steps": [
+        { "goto": { "person": "nearest", "within": 25 } },
+        { "work": 0.01 },
+        { "effect": { "kill": "target", "event": { "name": "Murder", "about": "target" }, "needs.Bloodlust": -1 } }
+      ],
+      "serves": { "Prey": "if(needs.Bloodlust > 0.6, 1.3, 0)" }
+    },
+    "Hide": {
+      "kind": "mind",
+      "role": "action",
+      "description": "Go home (if they have one) and stay inside while dread is high.",
+      "steps": [{ "goto": "home", "optional": true }, { "stay": true }],
+      "serves": { "Survive": "if(needs.Dread > 0.4, 1.2, 0)" }
+    }
+  },
+  "extends": {
+    "Survive": { "weight": "max(needs.Fear, needs.Dread)" }
+  },
+  "edges": {
+    "hates": { "from": "entity", "to": "entity", "description": "A person hates another (here: a killer)." }
+  },
+  "events": {
+    "Murder": { "seenWithin": 7, "heard": "everyone", "description": "Someone was killed." }
+  },
+  "reactions": [
+    { "on": "witness", "if": "event.name == \"Murder\"", "do": { "needs.Dread": 0.8, "needs.Anger": 0.5, "link": { "edge": "hates", "to": "other" } } },
+    { "on": "witness", "if": "event.name == \"Murder\"", "do": { "link": { "edge": "grudge", "to": "other" } } },
+    { "on": "hears", "if": "event.name == \"Murder\" and event.known", "do": { "needs.Dread": 0.5, "link": { "edge": "hates", "to": "other" } } },
+    { "on": "hears", "if": "event.name == \"Murder\" and not event.known", "do": { "needs.Dread": 0.7 } },
+    { "on": "meets", "if": "rel.hates", "do": { "needs.Dread": 0.3, "needs.Anger": 0.3 } }
+  ]
+}

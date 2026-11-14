@@ -97,7 +97,7 @@ describe("Archie's pack check", () => {
         { pack: "a", version: "0.1.0", requires: ["b"] },
         { pack: "b", version: "0.1.0", requires: ["a"] },
       ]).join(),
-    ).toMatch(/circular requirement: a → b → a/);
+    ).toMatch(/circular requirement: (a → b → a|b → a → b)/);
     expect(errorsOf([CORE, { pack: "dup", version: "0.1.0", types: { Tree: { kind: "entity" } } }]).join()).toMatch(
       /type "Tree" is already defined by pack "core"/,
     );

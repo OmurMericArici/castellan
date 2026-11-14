@@ -19,9 +19,11 @@ interface Moment {
   text: string;
 }
 
+const MORE_VERB: Record<string, string> = { Hide: "hid at home", Murder: "stalked someone" };
+const MORE_ONGOING: Record<string, string> = { Hide: "hiding at home", Murder: "stalking someone" };
 const VERB: Record<string, string> = { Explore: "explored", Wander: "wandered", Rest: "rested", Scout: "scouted for trees", Gather: "gathered wood", Deliver: "carried wood to the site", Build: "built", Forage: "foraged", SeekFood: "looked for food", Confront: "confronted someone" };
 const ONGOING: Record<string, string> = { Explore: "exploring", Wander: "wandering", Rest: "resting", Scout: "scouting for trees", Gather: "gathering wood", Deliver: "carrying wood to the site", Build: "building", Forage: "foraging", SeekFood: "looking for food", Confront: "confronting someone" };
-const PLURAL: Record<string, string> = { Tree: "trees", Stone: "stones", Person: "people" };
+const PLURAL: Record<string, string> = { Tree: "trees", Stone: "stones", Person: "people", Bush: "bushes" };
 
 export class StoryBook {
   private read = 0;
@@ -40,6 +42,12 @@ export class StoryBook {
     for (; this.read < world.log.length; this.read++) {
       const { t, by, event: e } = world.log[this.read]!;
       if (e.kind === "signal" && e.name === "dusk") this.lastDusk = t;
+      if (e.kind === "happened" && e.name === "Murder") {
+        const name = (id: NodeId | undefined) => (id === undefined ? "someone" : String(g.node(id)?.attrs["name"] ?? "someone"));
+        this.note(e.actor, t, `killed ${name(e.about)}${e.witnesses.length ? `, seen by ${e.witnesses.map(name).join(", ")}` : ", unseen"}`);
+        if (e.about !== undefined) this.note(e.about, t, `was killed by ${name(e.actor)}`);
+        for (const wi of e.witnesses) this.note(wi, t, `saw ${name(e.actor)} kill ${name(e.about)}`);
+      }
       if (e.kind === "met") {
         const name = (id: NodeId) => String(g.node(id)?.attrs["name"] ?? "someone");
         const grudge = (a: NodeId, b: NodeId) => g.edgesOf(a, "grudge").some((x) => x.from === a && x.to === b);
@@ -88,7 +96,7 @@ export class StoryBook {
     for (const s of this.segments.get(person) ?? []) {
       const sameDay = s.end !== undefined && Math.floor(s.start) === Math.floor(s.end);
       const end = s.end === undefined ? "now" : sameDay ? clockLabel(s.end).replace(/^Day \d+, /, "") : clockLabel(s.end);
-      const verb = s.end === undefined ? (ONGOING[s.action] ?? s.action.toLowerCase()) : (VERB[s.action] ?? s.action.toLowerCase());
+      const verb = s.end === undefined ? (ONGOING[s.action] ?? MORE_ONGOING[s.action] ?? s.action.toLowerCase()) : (VERB[s.action] ?? MORE_VERB[s.action] ?? s.action.toLowerCase());
       const parts = [verb];
       if (s.lateMinutes) parts.push(`after staying out ${s.lateMinutes} min past dark`);
       const seen = [...s.seen].map(([type, n]) => `${n} new ${n === 1 ? type.toLowerCase() : (PLURAL[type] ?? `${type.toLowerCase()}s`)}`);

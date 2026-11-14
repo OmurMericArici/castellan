@@ -20,8 +20,3 @@ export const DEFAULT_NOAH: NoahConfig = {
     { type: "Person", count: 6, avoid: [{ field: "water", above: 0.05 }] },
   ],
 };
-
-/** Extra leaves for the hunger pack; only used when that pack is loaded. */
-export const NOAH_HUNGER_LEAVES: NoahConfig["leaves"] = [
-  { type: "Bush", count: 70, prefer: "fertility", avoid: [{ field: "water", above: 0.05 }] },
-];
