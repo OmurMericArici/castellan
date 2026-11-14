@@ -53,6 +53,11 @@ New ideas go here, not into the current milestone. Each one gets a date and one 
 Moving an item into scope needs a decision record.
 
 - 2026-11-14 — Villages that merge, split or dissolve; houses that collapse when their condition hits zero; repair.
+- 2026-11-15 — Problem-solving mind (ADR-0032): problems → learned, preferred methods → sub-problems, down to steps; replaces flat action choice.
+- 2026-11-15 — Emotions beside needs (ADR-0032), e.g. high sexual desire raises aggression.
+- 2026-11-15 — Declared interactions between node types; packs adding new node kinds (ADR-0032).
+- 2026-11-15 — Mating and marriage as methods (desire → find a mate → a friend of the opposite sex → marry).
+- 2026-11-15 — Watching morality emerge in a crowded, long simulation (methods punished or rewarded by others' reactions).
 - 2026-11-15 — Witnessed events as shared knowledge claims that spread by telling (today: Molly's witness/hears only).
 - 2026-11-15 — Justice: villagers acting together against a known killer (needs group actions).
 - 2026-11-14 — Lies pack: knowledge given wrong on purpose.
