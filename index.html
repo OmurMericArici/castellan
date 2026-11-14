@@ -9,7 +9,7 @@
   <body>
     <header>
       <h1>Castellan</h1>
-      <p>A node-based world builder. Milestone M4: people explore, get a spot for a house from Molly, gather wood and build it; houses close together become a named village. Click a person to follow them.</p>
+      <p>A node-based world builder. Milestone M5: all behaviour comes from packs. People explore, forage, build houses that become named villages, hold grudges and remember imperfectly. Click a person to follow them.</p>
     </header>
     <main>
       <div class="controls">
@@ -31,10 +31,12 @@
       </div>
       <canvas id="world"></canvas>
       <p class="hint" id="summary"></p>
+      <pre class="error" id="warnings" hidden></pre>
       <p class="hint legend">
         <span class="dot tree"></span> tree
         <span class="dot stone"></span> stone
         <span class="dot person"></span> person
+        <span class="dot bush"></span> berry bush
         <span class="sq house"></span> house
         <span class="sq site"></span> building site
         <span class="ring"></span> known to the selected person

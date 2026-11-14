@@ -5,7 +5,7 @@ import type { Scope } from "./expr";
 import type { GraphNode, NodeId, Vec2 } from "./graph";
 import type { NumberSource, TypeDef } from "./packs";
 import { passable } from "./path";
-import { buildTypes, homeOf, knownSubjects, num, planOf } from "./projects";
+import { buildTypes, homeOf, planOf } from "./projects";
 import { createRng, hash2, hashString } from "./rng";
 import { DUSK, nextAt } from "./time";
 import { createEdge, createNode, emit, schedule } from "./world";
@@ -77,7 +77,11 @@ export class Molly {
     const need = clamp01(this.num(rule.when, this.adam.scopeFor(person)));
     if (need <= 0) return undefined;
     const others = [...w.graph.nodes({ kind: "entity", type: type.name })].filter((n) => n.pos);
-    const material = knownSubjects(w, person.id, rule.material).filter((s) => s.pos && num(s.attrs[rule.materialAttr]) > 0);
+    // What the person remembers about the material, not what is really there.
+    const material = this.adam
+      .knowledge(person.id, rule.material)
+      .map((k) => ({ pos: k.pos, amount: typeof k.it[rule.materialAttr] === "number" ? (k.it[rule.materialAttr] as number) : 0 }))
+      .filter((m) => m.amount > 0);
     const rng = createRng(w.seed).fork(hash2(hash2(person.id, Math.floor(w.time)), hashString("molly:spots")));
 
     let best: { pos: Vec2; mu: number; parts: Record<string, number> } | undefined;
@@ -94,7 +98,7 @@ export class Molly {
       if (nearest < rule.near.min) continue;
       const company = others.length === 0 || nearest <= rule.near.prefer ? 1 : Math.max(0.6, rule.near.prefer / nearest);
       let wood = 0;
-      for (const m of material) if (Math.hypot(m.pos!.x - p.x, m.pos!.y - p.y) <= MATERIAL_RADIUS) wood += num(m.attrs[rule.materialAttr]);
+      for (const m of material) if (Math.hypot(m.pos.x - p.x, m.pos.y - p.y) <= MATERIAL_RADIUS) wood += m.amount;
       const mat = Math.min(1, wood / rule.amount);
       const mu = need * spot * mat * company;
       if (!best || mu > best.mu) best = { pos: { x: Math.round(p.x * 100) / 100, y: Math.round(p.y * 100) / 100 }, mu, parts: { need, spot, material: mat, company } };

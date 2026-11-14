@@ -19,8 +19,8 @@ interface Moment {
   text: string;
 }
 
-const VERB: Record<string, string> = { Explore: "explored", Wander: "wandered", Rest: "rested", Scout: "scouted for trees", Gather: "gathered wood", Build: "built" };
-const ONGOING: Record<string, string> = { Explore: "exploring", Wander: "wandering", Rest: "resting", Scout: "scouting for trees", Gather: "gathering wood", Build: "building" };
+const VERB: Record<string, string> = { Explore: "explored", Wander: "wandered", Rest: "rested", Scout: "scouted for trees", Gather: "gathered wood", Deliver: "carried wood to the site", Build: "built", Forage: "foraged", SeekFood: "looked for food", Confront: "confronted someone" };
+const ONGOING: Record<string, string> = { Explore: "exploring", Wander: "wandering", Rest: "resting", Scout: "scouting for trees", Gather: "gathering wood", Deliver: "carrying wood to the site", Build: "building", Forage: "foraging", SeekFood: "looking for food", Confront: "confronting someone" };
 const PLURAL: Record<string, string> = { Tree: "trees", Stone: "stones", Person: "people" };
 
 export class StoryBook {
@@ -40,6 +40,12 @@ export class StoryBook {
     for (; this.read < world.log.length; this.read++) {
       const { t, by, event: e } = world.log[this.read]!;
       if (e.kind === "signal" && e.name === "dusk") this.lastDusk = t;
+      if (e.kind === "met") {
+        const name = (id: NodeId) => String(g.node(id)?.attrs["name"] ?? "someone");
+        const grudge = (a: NodeId, b: NodeId) => g.edgesOf(a, "grudge").some((x) => x.from === a && x.to === b);
+        if (grudge(e.a, e.b)) this.note(e.a, t, `ran into ${name(e.b)} and got angry`);
+        if (grudge(e.b, e.a)) this.note(e.b, t, `ran into ${name(e.a)} and got angry`);
+      }
       if (e.kind === "activity") {
         const list = this.segments.get(e.person) ?? [];
         const last = list[list.length - 1];
@@ -62,6 +68,9 @@ export class StoryBook {
           if (seg && type) seg.seen.set(type, (seg.seen.get(type) ?? 0) + 1);
         } else if (edge.type === "builds" && by === "molly") {
           this.note(edge.from, t, "Molly marked a spot for their house");
+        } else if (edge.type === "grudge") {
+          const other = g.node(edge.to);
+          this.note(edge.from, t, `found something emptied by ${String(other?.attrs["name"] ?? "someone")} and now holds a grudge`);
         } else if (edge.type === "livesIn") {
           this.note(edge.from, t, "finished their house and moved in");
         } else if (edge.type === "memberOf") {

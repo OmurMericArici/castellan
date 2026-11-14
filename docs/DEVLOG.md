@@ -3,6 +3,18 @@
 Newest first. One entry per session: what changed, what was learned, what's next.
 Add a screenshot/GIF path whenever something is visible.
 
+## 2026-11-15 — M5 Behaviour in packs
+
+- Engine work: Adam no longer knows verbs. Actions are step programs (goto, work, take, give, effect,
+  if, finish, stay); reactions fire on sees / meets / found-empty / finished / dusk / dawn; memory rules
+  (recall, fade, reinforce, forget) live on knowledge types; people notice each other (`meets`).
+- Content work: `core` and `shelter` rewritten as steps (Gather split into Gather + Deliver); all earlier
+  tests pass unchanged. New default packs `hunger` and `hostility`, written from PACKS.md only.
+- Emergent: a feud in seed 3 (two people hold grudges against Una, who later holds one back).
+- Pack rules that fail at runtime are skipped with a warning instead of crashing the world.
+- PACKS.md rewritten for format 0.4. ADR-0028. 50 tests.
+- **Next:** M6: WFC house layouts, story panel polish, Noah config in the URL, README with GIF → v0.1.
+
 ## 2026-11-15 — Engine, not game
 
 - Checked whether hunger, hostility and imperfect memory could be packs: they can't (actions can't

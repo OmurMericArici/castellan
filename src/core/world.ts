@@ -24,7 +24,9 @@ export type WorldEvent =
   /** A person starts doing something; walking actions carry their whole leg. */
   | { kind: "activity"; person: NodeId; activity: Activity }
   /** Something Molly recognised that everyone can feel: dusk, dawn. */
-  | { kind: "signal"; name: string };
+  | { kind: "signal"; name: string }
+  /** Two people came within sight of each other. */
+  | { kind: "met"; a: NodeId; b: NodeId };
 
 /** What a person is doing right now. Position while walking is computed from the leg. */
 export interface Activity {
@@ -161,6 +163,7 @@ function apply(world: World, event: WorldEvent): void {
       world.activities.set(event.person, event.activity);
       return;
     case "signal":
+    case "met":
       return;
   }
 }

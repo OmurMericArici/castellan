@@ -15,8 +15,8 @@ export type { Activity, EdgeInit, Handler, Leg, LoggedEvent, NodeInit, Scheduled
 export { compile, evaluate, ExprError, FUNCTION_NAMES, LIMITS } from "./expr";
 export type { Compiled, EvalContext, Scope, Value } from "./expr";
 export { checkPacks, EMPTY_REGISTRY, formatPackError } from "./packs";
-export { MIND_SCOPE, VERBS } from "./packs";
-export type { ActionRule, AttrDef, CheckResult, EdgeTypeDef, GoalRule, MindRole, NeedRule, NumberSource, PackError, Registry, TypeDef, Verb } from "./packs";
+export { MIND_SCOPE, REACTION_EVENTS } from "./packs";
+export type { ActionRule, AttrDef, CheckResult, EdgeTypeDef, Effect, GoalRule, MemoryRule, MindRole, NeedRule, NumberSource, PackError, Reaction, Registry, Step, Target, TypeDef } from "./packs";
 export { instantiateAttrs, loadPacks, PackLoadError, requireType } from "./archie";
 export { genesis } from "./noah";
 export type { GenesisReport, LeafSpec, NoahConfig } from "./noah";

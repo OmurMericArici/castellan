@@ -1,53 +1,134 @@
 {
   "pack": "shelter",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "People need shelter: Molly plans houses where need, wood and land line up; people gather wood and build them; houses close together become a village.",
-  "requires": ["core"],
+  "requires": [
+    "core"
+  ],
   "types": {
     "Shelter": {
       "kind": "mind",
       "role": "need",
       "description": "Having a safe place to sleep. Falls once they live in a house.",
-      "start": { "expr": "rand_range(0.2, 0.4)" },
-      "rate": { "expr": "if(home, -0.5, if(night, 0.12, 0.05))" },
+      "start": {
+        "expr": "rand_range(0.2, 0.4)"
+      },
+      "rate": {
+        "expr": "if(home, -0.5, if(night, 0.12, 0.05))"
+      },
       "urgentAt": 0.8
     },
     "Secure": {
       "kind": "mind",
       "role": "goal",
       "tier": 2,
-      "weight": { "expr": "needs.Shelter" },
+      "weight": {
+        "expr": "needs.Shelter"
+      },
       "description": "Secure a place to live."
     },
     "Scout": {
       "kind": "mind",
       "role": "action",
-      "do": "explore",
       "description": "Look for trees when they have a house to build but know too few.",
-      "serves": { "Secure": { "expr": "if(plan.active and knows.Tree < 6, 1, 0)" } }
+      "serves": {
+        "Secure": {
+          "expr": "if(plan.active and knows.Tree < 6, 1, 0)"
+        }
+      },
+      "steps": [
+        {
+          "goto": {
+            "explore": true
+          }
+        }
+      ]
     },
     "Gather": {
       "kind": "mind",
       "role": "action",
-      "do": "gather",
-      "description": "Walk to a tree they know, cut wood, carry it to their building site.",
-      "serves": { "Secure": { "expr": "if(plan.missing > 0, 1, 0)" } }
+      "description": "Walk to a tree they remember having wood, cut, and take up to a load.",
+      "steps": [
+        {
+          "goto": {
+            "known": "Tree",
+            "where": "it.wood > 0"
+          }
+        },
+        {
+          "work": 0.04
+        },
+        {
+          "take": {
+            "from": "wood",
+            "to": "carrying",
+            "amount": "min(4 - self.carrying, plan.missing - self.carrying)"
+          }
+        }
+      ],
+      "serves": {
+        "Secure": "if(plan.missing - self.carrying > 0 and self.carrying < 4, 1, 0)"
+      }
+    },
+    "Deliver": {
+      "kind": "mind",
+      "role": "action",
+      "description": "Carry the wood in hand to the building site.",
+      "steps": [
+        {
+          "goto": "plan"
+        },
+        {
+          "give": {
+            "from": "carrying",
+            "to": "stock",
+            "amount": "self.carrying"
+          }
+        }
+      ],
+      "serves": {
+        "Secure": "if(self.carrying > 0 and (self.carrying >= 4 or self.carrying >= plan.missing), 1.05, 0)"
+      }
     },
     "Build": {
       "kind": "mind",
       "role": "action",
-      "do": "build",
-      "description": "Work on the house once all the wood is there.",
-      "serves": { "Secure": { "expr": "if(plan.ready, 1.1, 0)" } }
+      "description": "Work on the house once all the wood is there; then move in.",
+      "steps": [
+        {
+          "goto": "plan"
+        },
+        {
+          "work": "plan.workLeft",
+          "progress": "worked"
+        },
+        {
+          "finish": "plan"
+        }
+      ],
+      "serves": {
+        "Secure": "if(plan.ready, 1.1, 0)"
+      }
     },
-
     "House": {
       "kind": "entity",
       "description": "A house. Starts as a concept Molly places; becomes real through gathering and work.",
       "attrs": {
-        "state": { "type": "string", "default": "planned", "description": "planned or built (set by the engine)" },
-        "stock": { "type": "number", "default": 0, "description": "Wood delivered to the site." },
-        "worked": { "type": "number", "default": 0, "description": "Days of building done." }
+        "state": {
+          "type": "string",
+          "default": "planned",
+          "description": "planned or built (set by the engine)"
+        },
+        "stock": {
+          "type": "number",
+          "default": 0,
+          "description": "Wood delivered to the site."
+        },
+        "worked": {
+          "type": "number",
+          "default": 0,
+          "description": "Days of building done."
+        }
       },
       "build": {
         "meets": "Shelter",
@@ -57,9 +138,16 @@
         "work": 0.5,
         "planner": "builds",
         "resident": "livesIn",
-        "when": { "expr": "needs.Shelter" },
-        "spot": { "expr": "clamp(0.4 + field.fertility - field.water * 2, 0, 1)" },
-        "near": { "min": 2.5, "prefer": 9 },
+        "when": {
+          "expr": "needs.Shelter"
+        },
+        "spot": {
+          "expr": "clamp(0.4 + field.fertility - field.water * 2, 0, 1)"
+        },
+        "near": {
+          "min": 2.5,
+          "prefer": 9
+        },
         "wear": 0.004
       }
     },
@@ -67,14 +155,38 @@
       "kind": "entity",
       "description": "Houses close together, recognised and named by Molly.",
       "attrs": {
-        "name": { "type": "string", "default": { "expr": "pick(\"Akpınar\", \"Eskidere\", \"Sarıçam\", \"Taşlık\", \"Yeşilova\", \"Karaağaç\", \"Değirmenli\", \"Kuzeybayır\", \"Ilıca\", \"Kayalı\", \"Söğütlü\", \"Gölbaşı\")" } }
+        "name": {
+          "type": "string",
+          "default": {
+            "expr": "pick(\"Akpınar\", \"Eskidere\", \"Sarıçam\", \"Taşlık\", \"Yeşilova\", \"Karaağaç\", \"Değirmenli\", \"Kuzeybayır\", \"Ilıca\", \"Kayalı\", \"Söğütlü\", \"Gölbaşı\")"
+          }
+        }
       },
-      "recognize": { "members": "House", "radius": 12, "min": 2, "full": 3, "formAt": 0.5, "memberEdge": "memberOf" }
+      "recognize": {
+        "members": "House",
+        "radius": 12,
+        "min": 2,
+        "full": 3,
+        "formAt": 0.5,
+        "memberEdge": "memberOf"
+      }
     }
   },
   "edges": {
-    "builds": { "from": "entity", "to": "entity", "description": "A person building a house (concept or finished)." },
-    "livesIn": { "from": "entity", "to": "entity", "description": "A person's home." },
-    "memberOf": { "from": "entity", "to": "entity", "description": "A house belongs to a village." }
+    "builds": {
+      "from": "entity",
+      "to": "entity",
+      "description": "A person building a house (concept or finished)."
+    },
+    "livesIn": {
+      "from": "entity",
+      "to": "entity",
+      "description": "A person's home."
+    },
+    "memberOf": {
+      "from": "entity",
+      "to": "entity",
+      "description": "A house belongs to a village."
+    }
   }
 }

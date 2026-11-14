@@ -121,18 +121,19 @@ describe("mind rules in packs", () => {
       requires: ["core"],
       types: {
         Hunger: { kind: "mind", role: "need", rate: { expr: "needs.Fatige" }, tier: 2 },
-        Eat: { kind: "mind", role: "action", do: "eatt", serves: { Survival: 1 } },
+        Eat: { kind: "mind", role: "action", do: "eat", serves: { Survival: 1 } },
         Thrive: { kind: "mind", role: "goal", weight: { expr: "knows.Bush" } },
       },
     };
     const r = checkPacks([CORE, bad]);
     const msgs = r.ok ? "" : r.errors.map(formatPackError).join("\n");
     expect(msgs).toMatch(/types.Hunger.tier: "tier" belongs to goal types, not need types/);
-    expect(msgs).toMatch(/types.Eat.do: actions need a verb Adam knows: explore, wander, rest/);
+    expect(msgs).toMatch(/types.Eat.do: "do" was replaced by "steps"/);
+    expect(msgs).toMatch(/types.Eat.steps: actions need "steps"/);
     expect(msgs).toMatch(/types.Thrive.tier: goals need a tier/);
     const second = checkPacks([
       CORE,
-      { ...bad, types: { Hunger: { kind: "mind", role: "need", rate: { expr: "needs.Fatige" } }, Eat: { kind: "mind", role: "action", do: "rest", serves: { Survival: 1 } } } },
+      { ...bad, types: { Hunger: { kind: "mind", role: "need", rate: { expr: "needs.Fatige" } }, Eat: { kind: "mind", role: "action", steps: [{ stay: true }], serves: { Survival: 1 } } } },
     ]);
     const msgs2 = second.ok ? "" : second.errors.map(formatPackError).join("\n");
     expect(msgs2).toMatch(/"Survival" is not a goal type \(did you mean "Survive"\?\)/);

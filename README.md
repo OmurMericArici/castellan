@@ -1,10 +1,11 @@
 # Castellan
 
-A node-based world builder in the browser. You set up a land and a few people;
-houses, villages and their names emerge from what those people need, know and do.
+A node-based world-building engine in the browser, with a default pack. You set up a land
+and a few people; houses, villages, grudges and their names emerge from what those people
+need, know and do. Everything they do is defined in JSON packs, not in engine code.
 Every house and every name has a recorded cause you can read back.
 
-Status: design done for v0.1; skeleton live at https://omurmericarici.github.io/castellan/ (milestones M0–M4 done, M5 next).
+Status: design done for v0.1; skeleton live at https://omurmericarici.github.io/castellan/ (milestones M0–M5 done, M6 next).
 
 ## Docs
 

@@ -1,12 +1,13 @@
 import { instantiateAttrs, requireType } from "./archie";
 import { evaluate } from "./expr";
-import type { Scope, Value } from "./expr";
+import type { Compiled, Scope, Value } from "./expr";
 import type { Attrs, EdgeId, GraphNode, NodeId, Vec2 } from "./graph";
-import { isLazy, lazy, readLazy, timeToReach, withRate } from "./lazy";
+import { isLazy, lazy, readLazy, timeToReach, withRate, withValue } from "./lazy";
 import type { LazyValue } from "./lazy";
-import type { NumberSource, TypeDef } from "./packs";
+import type { Effect, NumberSource, ReactionEvent, Ref, Step, Target, TypeDef } from "./packs";
+import { REACTION_EVENTS } from "./packs";
 import { findPath, passable, pathLength, pointAlong } from "./path";
-import { homeOf, knownSubjects, num, planOf } from "./projects";
+import { homeOf, num, planOf } from "./projects";
 import type { Ticket } from "./queue";
 import { createRng, hash2, hashString } from "./rng";
 import type { Rng } from "./rng";
@@ -16,10 +17,10 @@ import { createEdge, createNode, emit, schedule } from "./world";
 import type { Handler, World } from "./world";
 
 /**
- * Adam runs the people (ADR-0020, 0024, 0025): wakes them on their events, scores
- * their goals, picks an action, and carries it out with one of a few verbs
- * (explore, wander, rest, gather, build). Packs decide what people want and why;
- * Adam is the machinery.
+ * Adam runs the people (ADR-0020, 0024, 0026). He knows no actions, only steps:
+ * walking (with sight and meetings computed ahead), timed work, moving values,
+ * effects. Packs say what an action is made of, when people want it, how they
+ * react and how they remember. Adam is the machinery (ADR-0027).
  */
 export interface AdamOptions {
   /** Walking speed in cells per day. */
@@ -28,13 +29,9 @@ export interface AdamOptions {
   sightNight: number;
   /** Longest time a person goes without re-thinking, in days. */
   maxIdle: number;
-  /** Material units a person can carry at once. */
-  carry: number;
-  /** Days it takes to cut one load. */
-  cutTime: number;
 }
 
-export const DEFAULT_ADAM: AdamOptions = { speed: 160, sightDay: 6, sightNight: 2, maxIdle: 0.25, carry: 4, cutTime: 0.04 };
+export const DEFAULT_ADAM: AdamOptions = { speed: 160, sightDay: 6, sightNight: 2, maxIdle: 0.25 };
 
 /** A tier-1 goal above this (plus the person's determination) takes over. */
 const URGENT = 0.6;
@@ -42,28 +39,31 @@ const URGENT = 0.6;
 const DETERMINATION_SHIELD = 0.3;
 /** Bonus for keeping the current action, scaled by determination × commitment. */
 const COMMIT_BONUS = 0.25;
-/** A sighting older than this (days) is worth refreshing when seen again. */
+/** Close enough to a target to count as there. */
+const THERE = 1;
+/** Two people don't "meet" again within this many days. */
+const MEET_COOLDOWN = 0.5;
+/** A knowledge link without a memory rule is refreshed when seen again after this many days. */
 const REFRESH_AFTER = 5;
-/** Close enough to count as "at home". */
-const AT_HOME = 1.5;
 
-/** Where a person is inside a multi-step verb. Engine-side; rebuilt by re-deciding if lost. */
-type Task =
-  | { kind: "gather"; phase: "toSource" | "cut" | "toSite"; source?: NodeId }
-  | { kind: "build"; phase: "toSite" | "work" }
-  | { kind: "walk" };
+/** A running action: which step, and what it is aimed at. Engine-side; re-deciding rebuilds it. */
+interface Program {
+  readonly action: string;
+  readonly steps: readonly Step[];
+  index: number;
+  target?: NodeId;
+}
 
 interface Runtime {
   wake?: Ticket;
-  leg: Ticket[];
-  task?: Task;
+  /** Tickets for the current step (arrival, sights, meetings, work done). */
+  step: Ticket[];
+  program?: Program;
   heading?: number;
   needEdges: Map<string, EdgeId>;
-  known: Set<NodeId>;
-  knownPositions: Vec2[];
-  knownCounts: Map<string, number>;
-  /** Sources the person found empty; they won't walk there again. */
-  exhausted: Set<NodeId>;
+  lastMet: Map<NodeId, number>;
+  /** Guards against actions that finish instantly over and over at the same moment. */
+  instant: { t: number; n: number };
 }
 
 export interface Choice {
@@ -76,10 +76,23 @@ export interface AdamHooks {
   onBuilt?: (node: NodeId) => void;
 }
 
+/** What a person knows of one thing: the claim, where it says the thing is, and what they remember of it. */
+interface Known {
+  subject: NodeId;
+  claim: NodeId;
+  pos: Vec2;
+  it: Scope;
+}
+
 export class Adam {
   readonly handlers: ReadonlyMap<string, Handler>;
   /** Last decision per person, for the UI and tests. Engine-side, not world truth. */
   readonly lastChoice = new Map<NodeId, { reason: string; scores: Choice[] }>();
+  /**
+   * Runtime problems in pack rules (an expression reading something that isn't there).
+   * The rule is skipped and the world keeps running; the UI shows these.
+   */
+  readonly warnings: string[] = [];
   hooks: AdamHooks = {};
   private readonly rt = new Map<NodeId, Runtime>();
   private readonly mindNodes = new Map<string, NodeId>();
@@ -101,6 +114,8 @@ export class Adam {
       ["adam.arrive", (_w, d) => this.arrive(d as { person: NodeId; depart: number })],
       ["adam.done", (_w, d) => this.done(d as { person: NodeId; startedAt: number })],
       ["adam.see", (_w, d) => this.see(d as { person: NodeId; subject: NodeId })],
+      ["adam.meet", (_w, d) => this.meet(d as { a: NodeId; b: NodeId })],
+      ["adam.forget", (_w, d) => this.forget(d as { edge: EdgeId; since: number })],
     ]);
   }
 
@@ -135,9 +150,12 @@ export class Adam {
     }
   }
 
-  /** Molly's signals (dusk, dawn, a new plan) reach people at once. */
+  /** Molly's signals (dusk, dawn) reach everyone at once; packs may react to them. */
   wakeAll(reason: string): void {
-    for (const p of this.people()) this.decide(p.id, reason);
+    for (const p of this.people()) {
+      if ((REACTION_EVENTS as readonly string[]).includes(reason)) this.react(reason as ReactionEvent, p.id, {});
+      this.decide(p.id, reason);
+    }
   }
 
   wake(person: NodeId, reason: string): void {
@@ -164,15 +182,35 @@ export class Adam {
     return out;
   }
 
+  /** Everything the person knows of, newest version of each thing. */
+  knowledge(person: NodeId, type?: string): Known[] {
+    const g = this.world.graph;
+    const out: Known[] = [];
+    for (const k of g.edgesOf(person, "knows")) {
+      if (k.from !== person) continue;
+      const claim = g.node(k.to);
+      if (!claim) continue;
+      for (const a of g.edgesOf(claim.id, "about")) {
+        const s = g.node(a.to);
+        if (!s || (type && s.type !== type)) continue;
+        out.push({ subject: s.id, claim: claim.id, pos: { x: num(claim.attrs["x"]), y: num(claim.attrs["y"]) }, it: { ...attrScope(claim.attrs), id: s.id } });
+      }
+    }
+    return out;
+  }
+
   knownCount(id: NodeId): number {
-    return this.runtime(id).known.size;
+    return this.knowledge(id).length;
   }
 
   /** What a person's mind expressions see right now (also used by Molly). */
   scopeFor(person: GraphNode, doing = this.world.activities.get(person.id)?.action ?? ""): Scope {
-    const rt = this.runtime(person.id);
     const knows: Scope = {};
-    for (const t of this.types) if (t.memorable) knows[t.name] = rt.knownCounts.get(t.name) ?? 0;
+    for (const t of this.types) if (t.memorable) knows[t.name] = 0;
+    for (const k of this.knowledge(person.id)) {
+      const type = this.world.graph.node(k.subject)?.type;
+      if (type && typeof knows[type] === "number") knows[type] = (knows[type] as number) + 1;
+    }
     const plan = planOf(this.world, person.id);
     return {
       needs: this.needLevels(person.id),
@@ -180,15 +218,19 @@ export class Adam {
       knows,
       self: selfScope(person),
       doing,
-      plan: { active: plan !== undefined, missing: plan?.missing ?? 0, ready: plan?.ready ?? false },
-      carrying: num(person.attrs["carrying"]),
+      plan: {
+        active: plan !== undefined,
+        missing: plan?.missing ?? 0,
+        ready: plan?.ready ?? false,
+        workLeft: plan ? Math.max(0, plan.rule.work - num(plan.node.attrs["worked"])) : 0,
+      },
       home: homeOf(this.world, person.id) !== undefined,
     };
   }
 
   // ---------------------------------------------------------------- deciding
 
-  /** `finished`: the current activity just ended, so it no longer counts as ongoing. */
+  /** `finished`: the current action just ended, so it no longer counts as ongoing. */
   private decide(id: NodeId, reason: string, finished = false): void {
     const w = this.world;
     const person = w.graph.node(id);
@@ -199,279 +241,379 @@ export class Adam {
 
     const now = w.time;
     const act = w.activities.get(id);
-    const current = act?.action ?? "";
-    const legDone = act?.leg ? now >= act.leg.arrive - 1e-9 : false;
-    const ongoing = act !== undefined && !legDone && !finished;
-    const commitment = !ongoing ? 0 : act.leg ? 0.5 + 0.5 * clamp01((now - act.leg.depart) / (act.leg.arrive - act.leg.depart)) : 0.5;
+    const current = rt.program?.action ?? "";
+    const ongoing = rt.program !== undefined && !finished;
+    const commitment = !ongoing ? 0 : act?.leg ? 0.5 + 0.5 * clamp01((now - act.leg.depart) / (act.leg.arrive - act.leg.depart)) : 0.5;
     const determination = typeof person.attrs["determination"] === "number" ? person.attrs["determination"] : 0.5;
 
-    const scope = this.scopeFor(person, current);
+    const scope = this.scopeFor(person, act?.action ?? "");
     const goals = this.types
       .filter((t) => t.goal)
-      .map((t) => ({ name: t.name, tier: t.goal!.tier, weight: clamp01(this.num(t.goal!.weight, scope)) }));
+      .map((t) => ({ name: t.name, tier: t.goal!.tier, weight: clamp01(this.safeNum(t.goal!.weight, scope, `${t.name}.weight`)) }));
     const bar = URGENT + determination * commitment * DETERMINATION_SHIELD;
     let urgent = goals.filter((g) => g.tier === 1 && g.weight > bar).map((g) => g.name);
+    const helps = (t: TypeDef) =>
+      urgent.some((u) => {
+        const src = t.action?.serves.get(u);
+        return src !== undefined && this.safeNum(src, scope, `${t.name}.serves.${u}`) > 0;
+      });
     // If nothing the person can do helps the urgent goal, urgency can't narrow the choice.
-    const helps = (t: TypeDef) => urgent.some((u) => {
-      const src = t.action?.serves.get(u);
-      return src !== undefined && this.num(src, scope) > 0;
-    });
     if (urgent.length && !this.types.some((t) => t.action && helps(t))) urgent = [];
 
     const scores: Choice[] = [];
     for (const t of this.types) {
       if (!t.action) continue;
       let score = 0;
-      let helpsUrgent = false;
       for (const g of goals) {
         const src = t.action.serves.get(g.name);
-        if (!src) continue;
-        const c = this.num(src, scope);
-        score += g.weight * c;
-        if (c > 0 && urgent.includes(g.name)) helpsUrgent = true;
+        if (src) score += g.weight * this.safeNum(src, scope, `${t.name}.serves.${g.name}`);
       }
-      if (urgent.length && !helpsUrgent) continue;
+      if (urgent.length && !helps(t)) continue;
       if (t.name === current && ongoing) score += determination * commitment * COMMIT_BONUS;
       scores.push({ action: t.name, score });
     }
     scores.sort((a, b) => b.score - a.score);
     this.lastChoice.set(id, { reason, scores });
-    const chosen = scores[0]?.action ?? current;
+    const chosen = scores[0]?.action;
 
-    if (!(chosen === current && ongoing)) {
+    if (chosen && !(chosen === current && ongoing)) {
       this.interrupt(id, rt);
       this.begin(person, chosen, rt);
     }
-    this.updateRates(person, rt);
-    this.scheduleWake(person, rt, determination);
+    if (w.graph.node(id)) {
+      this.updateRates(person, rt);
+      this.scheduleWake(person, rt, determination);
+    }
   }
 
   private interrupt(id: NodeId, rt: Runtime): void {
     const w = this.world;
     const act = w.activities.get(id);
-    for (const t of rt.leg) w.queue.cancel(t);
-    rt.leg = [];
-    // Building work done so far is kept.
-    if (rt.task?.kind === "build" && rt.task.phase === "work" && act) {
-      const plan = planOf(w, id);
-      if (plan) emit(w, "adam", { kind: "node.attrs", id: plan.node.id, attrs: { worked: num(plan.node.attrs["worked"]) + (w.time - act.startedAt) } });
+    for (const t of rt.step) w.queue.cancel(t);
+    rt.step = [];
+    const prog = rt.program;
+    const step = prog?.steps[prog.index];
+    // Work done so far on something counts.
+    if (step?.kind === "work" && step.progress && prog?.target !== undefined && act && !act.leg) {
+      this.addTo(prog.target, step.progress, w.time - act.startedAt);
     }
-    rt.task = undefined;
+    rt.program = undefined;
     if (act?.leg && w.time < act.leg.arrive) {
       emit(w, "adam", { kind: "node.moved", id, pos: round2(this.positionOf(id)!) });
     }
   }
 
   private begin(person: GraphNode, action: string, rt: Runtime): void {
-    const verb = this.world.registry.types.get(action)?.action?.verb ?? "rest";
-    switch (verb) {
-      case "explore":
-        if (this.walk(person, action, this.exploreTarget(person, rt), rt) || this.walk(person, action, this.wanderTarget(person), rt)) return;
-        break;
-      case "wander":
-        if (this.walk(person, action, this.wanderTarget(person), rt)) return;
-        break;
-      case "gather":
-        if (this.startGather(person, action, rt)) return;
-        break;
-      case "build":
-        if (this.startBuild(person, action, rt)) return;
-        break;
-      case "rest": {
-        const home = homeOf(this.world, person.id);
-        if (home?.pos && dist(person.pos!, home.pos) > AT_HOME && this.walk(person, action, [home.pos], rt)) return;
-        break;
-      }
+    const steps = this.world.registry.types.get(action)?.action?.steps;
+    if (!steps) return;
+    if (rt.instant.t === this.world.time && rt.instant.n >= 3) {
+      // The same moment keeps producing actions that end at once: just wait.
+      this.stay(person.id, action, rt);
+      return;
     }
-    this.stay(person.id, action);
+    rt.program = { action, steps, index: 0 };
+    this.run(person.id, rt);
   }
 
-  /** Do the action in place (resting, or a verb that couldn't start). */
-  private stay(id: NodeId, action: string): void {
-    emit(this.world, "adam", { kind: "activity", person: id, activity: { action, startedAt: this.world.time } });
+  // ---------------------------------------------------------------- running steps
+
+  /** Run instant steps until one takes time, or the program ends. */
+  private run(id: NodeId, rt: Runtime): void {
+    const w = this.world;
+    const prog = rt.program;
+    if (!prog) return;
+    while (prog.index < prog.steps.length) {
+      const person = w.graph.node(id);
+      if (!person?.pos) return;
+      const step = prog.steps[prog.index]!;
+      try {
+      switch (step.kind) {
+        case "goto": {
+          const dests = this.destinations(person, step.target, prog, rt);
+          if (dests.length === 0) {
+            if (step.optional) break;
+            return this.end(id, rt, "nothing to go to");
+          }
+          const near = dests.find((d) => dist(person.pos!, d.pos) <= THERE);
+          if (near) {
+            if (near.node !== undefined) prog.target = near.node;
+            break;
+          }
+          if (this.walk(person, prog.action, dests, rt)) return;
+          if (step.optional) break;
+          return this.end(id, rt, "couldn't get there");
+        }
+        case "work": {
+          const d = this.num(step.duration, this.stepScope(person, prog));
+          if (d > 0) {
+            this.work(id, prog.action, d, rt);
+            return;
+          }
+          break;
+        }
+        case "take": {
+          const target = prog.target !== undefined ? w.graph.node(prog.target) : undefined;
+          if (!target) return this.end(id, rt, "nothing to take from");
+          const available = num(target.attrs[step.from]);
+          if (available <= 0) {
+            // What they remembered was out of date: they see it as it is now.
+            this.see({ person: id, subject: target.id });
+            this.react("found-empty", id, { it: target.id });
+            return this.end(id, rt, "found it empty");
+          }
+          const amount = Math.min(available, Math.max(0, this.num(step.amount, this.stepScope(person, prog))));
+          if (amount > 0) {
+            emit(w, "adam", { kind: "node.attrs", id: target.id, attrs: { [step.from]: available - amount, lastTakenBy: id } });
+            if (step.to) this.addTo(id, step.to, amount);
+          }
+          break;
+        }
+        case "give": {
+          const target = prog.target !== undefined ? w.graph.node(prog.target) : undefined;
+          if (!target) return this.end(id, rt, "nobody to give to");
+          const have = num(person.attrs[step.from]);
+          const amount = Math.min(have, Math.max(0, this.num(step.amount, this.stepScope(person, prog))));
+          if (amount > 0) {
+            this.addTo(id, step.from, -amount);
+            this.addTo(target.id, step.to, amount);
+          }
+          break;
+        }
+        case "effect":
+          this.apply(id, step.effects, this.stepScope(person, prog), prog.target, undefined);
+          break;
+        case "if":
+          if (evaluate(step.cond, { scope: this.stepScope(person, prog) }) !== true) return this.end(id, rt, "stopped");
+          break;
+        case "finish":
+          this.finishPlan(id);
+          break;
+        case "stay":
+          this.stay(id, prog.action, rt);
+          return;
+      }
+      } catch (e) {
+        this.warn(`${prog.action} step ${prog.index + 1} (${step.kind})`, e);
+        return this.end(id, rt, "error");
+      }
+      prog.index++;
+    }
+    this.end(id, rt, "finished");
   }
 
-  private walk(person: GraphNode, action: string, targets: Vec2[], rt: Runtime, task: Task = { kind: "walk" }): boolean {
+  /** The program is over; react and choose again. */
+  private end(id: NodeId, rt: Runtime, reason: string): void {
+    const action = rt.program?.action ?? "";
+    rt.program = undefined;
+    const now = this.world.time;
+    rt.instant = rt.instant.t === now ? { t: now, n: rt.instant.n + 1 } : { t: now, n: 1 };
+    if (reason === "finished") this.react("finished", id, { action });
+    this.decide(id, reason, true);
+  }
+
+  private stay(id: NodeId, action: string, rt: Runtime): void {
+    const w = this.world;
+    const act = w.activities.get(id);
+    if (!(act && act.action === action && !act.leg)) {
+      emit(w, "adam", { kind: "activity", person: id, activity: { action, startedAt: w.time } });
+    }
+    if (!rt.program) rt.program = { action, steps: [{ kind: "stay" }], index: 0 };
+  }
+
+  private work(id: NodeId, action: string, duration: number, rt: Runtime): void {
+    const w = this.world;
+    const startedAt = w.time;
+    emit(w, "adam", { kind: "activity", person: id, activity: { action, startedAt } });
+    rt.step.push(schedule(w, startedAt + duration, { handler: "adam.done", data: { person: id, startedAt } }));
+  }
+
+  private walk(person: GraphNode, action: string, dests: { pos: Vec2; node?: NodeId }[], rt: Runtime): boolean {
     const w = this.world;
     const from = person.pos!;
-    for (const to of targets) {
-      const path = findPath(w.space!, from, to);
-      if (!path || path.length < 2) continue;
-      const len = pathLength(path);
-      if (len < 0.3) continue;
+    for (const d of dests.slice(0, 4)) {
+      const path = findPath(w.space!, from, d.pos);
+      if (!path || path.length < 2 || pathLength(path) < 0.3) continue;
       const depart = w.time;
-      const arrive = depart + len / this.opts.speed;
+      const arrive = depart + pathLength(path) / this.opts.speed;
       const leg = { path: path.map(round2), depart, arrive };
       emit(w, "adam", { kind: "activity", person: person.id, activity: { action, startedAt: depart, leg } });
-      rt.heading = Math.atan2(to.y - from.y, to.x - from.x);
-      rt.task = task;
-      rt.leg.push(schedule(w, arrive, { handler: "adam.arrive", data: { person: person.id, depart } }));
+      rt.heading = Math.atan2(d.pos.y - from.y, d.pos.x - from.x);
+      if (rt.program && d.node !== undefined) rt.program.target = d.node;
+      rt.step.push(schedule(w, arrive, { handler: "adam.arrive", data: { person: person.id, depart } }));
       this.scheduleSights(person.id, leg, rt);
+      this.scheduleMeetings(person.id, leg, rt);
       return true;
     }
     return false;
   }
 
-  /** Timed work in place (cutting, building); `adam.done` fires when it is finished. */
-  private work(id: NodeId, action: string, duration: number, rt: Runtime, task: Task): void {
-    const w = this.world;
-    const startedAt = w.time;
-    emit(w, "adam", { kind: "activity", person: id, activity: { action, startedAt } });
-    rt.task = task;
-    rt.leg.push(schedule(w, startedAt + Math.max(0, duration), { handler: "adam.done", data: { person: id, startedAt } }));
-  }
-
-  // ---------------------------------------------------------------- gather and build (ADR-0025)
-
-  private startGather(person: GraphNode, action: string, rt: Runtime): boolean {
-    const w = this.world;
-    const plan = planOf(w, person.id);
-    if (!plan?.node.pos) return false;
-    const carrying = num(person.attrs["carrying"]);
-    const toFind = plan.missing - carrying;
-    // Carrying enough (or all one can): take it to the site.
-    if (carrying > 0 && (toFind <= 0 || carrying >= this.opts.carry)) {
-      if (dist(person.pos!, plan.node.pos) <= AT_HOME) {
-        this.deliver(person.id);
-        return this.startGather(person, action, rt);
-      }
-      return this.walk(person, action, [plan.node.pos], rt, { kind: "gather", phase: "toSite" });
-    }
-    if (toFind <= 0) return false;
-    // Otherwise to the nearest tree they know of and haven't found empty.
-    const sources = knownSubjects(w, person.id, plan.rule.material)
-      .filter((s) => s.pos && !rt.exhausted.has(s.id))
-      .sort((a, b) => dist(person.pos!, a.pos!) - dist(person.pos!, b.pos!));
-    for (const s of sources.slice(0, 3)) {
-      if (dist(person.pos!, s.pos!) < 1) {
-        this.cutAt(person.id, action, s.id, rt);
-        return true;
-      }
-      if (this.walk(person, action, [s.pos!], rt, { kind: "gather", phase: "toSource", source: s.id })) return true;
-    }
-    // Knows no usable tree: look for one.
-    return this.walk(person, action, this.exploreTarget(person, rt), rt);
-  }
-
-  private cutAt(id: NodeId, action: string, source: NodeId, rt: Runtime): void {
-    const plan = planOf(this.world, id);
-    const tree = this.world.graph.node(source);
-    if (!plan || !tree || num(tree.attrs[plan.rule.materialAttr]) <= 0) {
-      // The tree they remembered has nothing left: the knowledge was stale.
-      rt.exhausted.add(source);
-      this.decide(id, "found it empty", true);
-      return;
-    }
-    this.work(id, action, this.opts.cutTime, rt, { kind: "gather", phase: "cut", source });
-  }
-
-  private cutDone(id: NodeId, source: NodeId, rt: Runtime): void {
-    const w = this.world;
-    const plan = planOf(w, id);
-    const person = w.graph.node(id);
-    const tree = w.graph.node(source);
-    if (plan && person && tree) {
-      const attr = plan.rule.materialAttr;
-      const carrying = num(person.attrs["carrying"]);
-      const take = Math.min(this.opts.carry - carrying, num(tree.attrs[attr]), plan.missing - carrying);
-      if (take > 0) {
-        emit(w, "adam", { kind: "node.attrs", id: source, attrs: { [attr]: num(tree.attrs[attr]) - take } });
-        emit(w, "adam", { kind: "node.attrs", id, attrs: { carrying: carrying + take } });
-      }
-      if (num(tree.attrs[attr]) <= 0) rt.exhausted.add(source);
-    }
-    this.decide(id, "cut wood", true);
-  }
-
-  private deliver(id: NodeId): void {
-    const w = this.world;
-    const plan = planOf(w, id);
-    const person = w.graph.node(id);
-    if (!plan || !person) return;
-    const carrying = num(person.attrs["carrying"]);
-    if (carrying <= 0) return;
-    emit(w, "adam", { kind: "node.attrs", id: plan.node.id, attrs: { stock: num(plan.node.attrs["stock"]) + carrying } });
-    emit(w, "adam", { kind: "node.attrs", id, attrs: { carrying: 0 } });
-  }
-
-  private startBuild(person: GraphNode, action: string, rt: Runtime): boolean {
-    const plan = planOf(this.world, person.id);
-    if (!plan?.ready || !plan.node.pos) return false;
-    if (dist(person.pos!, plan.node.pos) > AT_HOME) {
-      return this.walk(person, action, [plan.node.pos], rt, { kind: "build", phase: "toSite" });
-    }
-    this.work(person.id, action, plan.rule.work - num(plan.node.attrs["worked"]), rt, { kind: "build", phase: "work" });
-    return true;
-  }
-
-  private finishBuild(id: NodeId): void {
-    const w = this.world;
-    const plan = planOf(w, id);
-    if (!plan) return;
-    const house = plan.node.id;
-    emit(w, "adam", { kind: "node.attrs", id: house, attrs: { state: "built", worked: plan.rule.work } });
-    createEdge(w, "adam", { type: plan.rule.resident, from: id, to: house });
-    this.hooks.onBuilt?.(house);
-  }
-
-  // ---------------------------------------------------------------- events
-
   private arrive(d: { person: NodeId; depart: number }): void {
     const w = this.world;
-    const act = w.activities.get(d.person);
-    const leg = act?.leg;
-    if (!act || !leg || leg.depart !== d.depart) return;
+    const leg = w.activities.get(d.person)?.leg;
+    if (!leg || leg.depart !== d.depart) return;
     const rt = this.runtime(d.person);
-    rt.leg = [];
+    rt.step = [];
     emit(w, "adam", { kind: "node.moved", id: d.person, pos: leg.path[leg.path.length - 1]! });
-    const task = rt.task;
-    rt.task = undefined;
-    if (task?.kind === "gather" && task.phase === "toSource" && task.source !== undefined) {
-      this.cutAt(d.person, act.action, task.source, rt);
-    } else if (task?.kind === "gather" && task.phase === "toSite") {
-      this.deliver(d.person);
-      this.decide(d.person, "delivered", true);
-    } else if (task?.kind === "build" && task.phase === "toSite") {
-      const plan = planOf(w, d.person);
-      if (plan?.ready) this.work(d.person, act.action, plan.rule.work - num(plan.node.attrs["worked"]), rt, { kind: "build", phase: "work" });
-      else this.decide(d.person, "arrived", true);
-    } else {
-      this.decide(d.person, "arrived", true);
-    }
+    if (!rt.program) return this.decide(d.person, "arrived", true);
+    rt.program.index++;
+    this.run(d.person, rt);
   }
 
   private done(d: { person: NodeId; startedAt: number }): void {
     const act = this.world.activities.get(d.person);
     if (!act || act.startedAt !== d.startedAt) return;
     const rt = this.runtime(d.person);
-    rt.leg = [];
-    const task = rt.task;
-    rt.task = undefined;
-    if (task?.kind === "gather" && task.phase === "cut" && task.source !== undefined) this.cutDone(d.person, task.source, rt);
-    else if (task?.kind === "build" && task.phase === "work") {
-      this.finishBuild(d.person);
-      this.decide(d.person, "built", true);
-    } else this.decide(d.person, "done", true);
+    rt.step = [];
+    const prog = rt.program;
+    if (!prog) return this.decide(d.person, "done", true);
+    const step = prog.steps[prog.index];
+    if (step?.kind === "work" && step.progress && prog.target !== undefined) this.addTo(prog.target, step.progress, this.world.time - act.startedAt);
+    prog.index++;
+    this.run(d.person, rt);
   }
+
+  /** Where a goto step may lead, best first. */
+  private destinations(person: GraphNode, target: Target, prog: Program, rt: Runtime): { pos: Vec2; node?: NodeId }[] {
+    const w = this.world;
+    const from = person.pos!;
+    switch (target.kind) {
+      case "known": {
+        const base = this.scopeFor(person);
+        return this.knowledge(person.id, target.type)
+          .filter((k) => !target.where || this.test(target.where, { ...base, it: k.it }, "goto.where"))
+          .sort((a, b) => dist(from, a.pos) - dist(from, b.pos))
+          .map((k) => ({ pos: k.pos, node: k.subject }));
+      }
+      case "home": {
+        const h = homeOf(w, person.id);
+        return h?.pos ? [{ pos: h.pos, node: h.id }] : [];
+      }
+      case "plan": {
+        const p = planOf(w, person.id);
+        return p?.node.pos ? [{ pos: p.node.pos, node: p.node.id }] : [];
+      }
+      case "target": {
+        const n = prog.target !== undefined ? w.graph.node(prog.target) : undefined;
+        const pos = n ? (n.type === "Person" ? this.positionOf(n.id) : n.pos) : undefined;
+        return pos && n ? [{ pos, node: n.id }] : [];
+      }
+      case "linked":
+        return w.graph
+          .edgesOf(person.id, target.edge)
+          .filter((e) => e.from === person.id)
+          .map((e) => ({ node: e.to, pos: this.positionOf(e.to) }))
+          .filter((d): d is { node: NodeId; pos: Vec2 } => d.pos !== undefined)
+          .sort((a, b) => dist(from, a.pos) - dist(from, b.pos));
+      case "explore":
+        return this.exploreTargets(person, rt).map((pos) => ({ pos }));
+      case "wander":
+        return this.wanderTargets(person, target.radius).map((pos) => ({ pos }));
+    }
+  }
+
+  // ---------------------------------------------------------------- effects and reactions
+
+  private stepScope(person: GraphNode, prog: Program): Scope {
+    const target = prog.target !== undefined ? this.world.graph.node(prog.target) : undefined;
+    return { ...this.scopeFor(person), target: target ? { ...attrScope(target.attrs), id: target.id } : {} };
+  }
+
+  private apply(id: NodeId, effects: readonly Effect[], scope: Scope, target: NodeId | undefined, other: NodeId | undefined): void {
+    const w = this.world;
+    const g = w.graph;
+    const rt = this.runtime(id);
+    const resolve = (ref: Ref): NodeId | undefined => {
+      if (ref.kind === "target") return target;
+      if (ref.kind === "other") return other;
+      const v = evaluate(ref.expr, { scope });
+      return typeof v === "number" && g.node(v) ? v : undefined;
+    };
+    for (const e of effects) {
+      if (e.kind === "need") {
+        const eid = rt.needEdges.get(e.need);
+        const level = eid !== undefined ? g.edge(eid)?.fromData["level"] : undefined;
+        if (eid === undefined || !isLazy(level)) continue;
+        const next = clamp01(readLazy(level, w.time) + this.num(e.delta, scope));
+        emit(w, "adam", { kind: "edge.data", id: eid, end: "from", data: { level: withValue(level, w.time, next) } });
+      } else if (e.kind === "set") {
+        const on = e.on === "self" ? id : target;
+        if (on !== undefined && g.node(on)) emit(w, "adam", { kind: "node.attrs", id: on, attrs: { [e.attr]: this.num(e.value, scope) } });
+      } else {
+        const to = resolve(e.to);
+        if (to === undefined || to === id) continue;
+        const existing = g.edgesOf(id, e.edge).filter((x) => x.from === id && x.to === to);
+        if (e.kind === "link" && existing.length === 0) createEdge(w, "adam", { type: e.edge, from: id, to });
+        if (e.kind === "unlink") for (const x of existing) emit(w, "adam", { kind: "edge.removed", id: x.id });
+      }
+    }
+    const person = g.node(id);
+    if (person && effects.some((e) => e.kind === "need")) {
+      this.scheduleWake(person, rt, typeof person.attrs["determination"] === "number" ? person.attrs["determination"] : 0.5);
+    }
+  }
+
+  /** Run the packs' reactions to something that happened to a person. */
+  private react(on: ReactionEvent, id: NodeId, ctx: { it?: NodeId; other?: NodeId; action?: string }): void {
+    const w = this.world;
+    const reactions = w.registry.reactions.filter((r) => r.on === on);
+    if (!reactions.length) return;
+    const person = w.graph.node(id);
+    if (!person) return;
+    const it = ctx.it !== undefined ? w.graph.node(ctx.it) : undefined;
+    const other = ctx.other !== undefined ? w.graph.node(ctx.other) : undefined;
+    const rel: Scope = {};
+    for (const name of w.registry.edges.keys()) rel[name] = false;
+    if (other) for (const e of w.graph.edgesOf(id)) if (e.from === id && e.to === other.id) rel[e.type] = true;
+    const scope: Scope = {
+      ...this.scopeFor(person),
+      it: it ? { ...attrScope(it.attrs), id: it.id } : {},
+      other: other ? { ...attrScope(other.attrs), id: other.id } : {},
+      rel,
+      action: ctx.action ?? "",
+    };
+    for (const r of reactions) {
+      const label = `${r.pack} reactions[${r.index}] (${r.on})`;
+      if (r.cond && !this.test(r.cond, scope, label)) continue;
+      try {
+        this.apply(id, r.effects, scope, ctx.it, ctx.other);
+      } catch (e) {
+        this.warn(label, e);
+      }
+    }
+  }
+
+  private addTo(id: NodeId, attr: string, delta: number): void {
+    const n = this.world.graph.node(id);
+    if (n) emit(this.world, "adam", { kind: "node.attrs", id, attrs: { [attr]: num(n.attrs[attr]) + delta } });
+  }
+
+  private finishPlan(id: NodeId): void {
+    const w = this.world;
+    const plan = planOf(w, id);
+    if (!plan || !plan.ready) return;
+    emit(w, "adam", { kind: "node.attrs", id: plan.node.id, attrs: { state: "built" } });
+    createEdge(w, "adam", { type: plan.rule.resident, from: id, to: plan.node.id });
+    this.hooks.onBuilt?.(plan.node.id);
+  }
+
+  // ---------------------------------------------------------------- needs and waking
 
   private updateRates(person: GraphNode, rt: Runtime): void {
     const w = this.world;
     const scope = this.scopeFor(person);
     for (const [name, eid] of rt.needEdges) {
       const rule = w.registry.types.get(name)?.need;
-      const edge = w.graph.edge(eid);
-      const level = edge?.fromData["level"];
-      if (!rule || !edge || !isLazy(level)) continue;
-      const rate = this.num(rule.rate, scope);
-      if (rate !== level.rate) {
-        emit(w, "adam", { kind: "edge.data", id: eid, end: "from", data: { level: withRate(level, w.time, rate) } });
-      }
+      const level = w.graph.edge(eid)?.fromData["level"];
+      if (!rule || !isLazy(level)) continue;
+      const rate = this.safeNum(rule.rate, scope, `${name}.rate`);
+      if (rate !== level.rate) emit(w, "adam", { kind: "edge.data", id: eid, end: "from", data: { level: withRate(level, w.time, rate) } });
     }
   }
 
   /** Wake again when a need crosses a line that matters, or after maxIdle at the latest. */
   private scheduleWake(person: GraphNode, rt: Runtime, determination: number): void {
     const w = this.world;
+    if (rt.wake) w.queue.cancel(rt.wake);
     const now = w.time;
     let at = now + this.opts.maxIdle;
     const act = w.activities.get(person.id);
@@ -488,18 +630,19 @@ export class Adam {
     rt.wake = schedule(w, at, { handler: "adam.wake", data: { person: person.id, reason: "need" } });
   }
 
-  // ---------------------------------------------------------------- choosing where to go
+  // ---------------------------------------------------------------- where to go
 
   private rngFor(id: NodeId, salt: string): Rng {
     return createRng(this.world.seed).fork(hash2(hash2(id, Math.floor(this.world.time * 10_000)), hashString(salt)));
   }
 
   /** Toward the unknown, biased by fertile land and the current heading; leg length is Lévy-like. */
-  private exploreTarget(person: GraphNode, rt: Runtime): Vec2[] {
+  private exploreTargets(person: GraphNode, rt: Runtime): Vec2[] {
     const space = this.world.space!;
     const rng = this.rngFor(person.id, "explore");
     const from = person.pos!;
     const fertility = space.fields.get("fertility");
+    const known = this.knowledge(person.id).map((k) => k.pos);
     const d = Math.min(40, 6 * Math.pow(1 - rng.next(), -1 / 1.5));
     const base = rng.next() * Math.PI * 2;
     const options: { p: Vec2; score: number }[] = [];
@@ -508,32 +651,31 @@ export class Adam {
       const p = { x: from.x + Math.cos(a) * d, y: from.y + Math.sin(a) * d };
       if (!passable(space, p.x, p.y, { maxWater: 0.3, slopeCost: 0 })) continue;
       let nearest = 20;
-      for (const k of rt.knownPositions) nearest = Math.min(nearest, Math.hypot(k.x - p.x, k.y - p.y));
-      const novelty = nearest / 20;
+      for (const k of known) nearest = Math.min(nearest, Math.hypot(k.x - p.x, k.y - p.y));
       const fert = fertility?.sample(p.x, p.y) ?? 0.5;
       const persist = rt.heading === undefined ? 0.5 : (Math.cos(a - rt.heading) + 1) / 2;
-      options.push({ p, score: 0.5 * novelty + 0.3 * fert + 0.2 * persist + 0.1 * rng.next() });
+      options.push({ p, score: 0.5 * (nearest / 20) + 0.3 * fert + 0.2 * persist + 0.1 * rng.next() });
     }
-    return options.sort((a, b) => b.score - a.score).slice(0, 4).map((o) => o.p);
+    return options.sort((a, b) => b.score - a.score).map((o) => o.p);
   }
 
-  private wanderTarget(person: GraphNode): Vec2[] {
+  private wanderTargets(person: GraphNode, radius: number): Vec2[] {
     const space = this.world.space!;
     const rng = this.rngFor(person.id, "wander");
     // Settled people stroll around their home.
     const home = homeOf(this.world, person.id);
-    const centre = home?.pos && dist(home.pos, person.pos!) < 15 ? home.pos : person.pos!;
+    const centre = home?.pos && dist(home.pos, person.pos!) < radius * 2.5 ? home.pos : person.pos!;
     const out: Vec2[] = [];
     for (let i = 0; i < 8; i++) {
       const a = rng.next() * Math.PI * 2;
-      const r = 2 + rng.next() * 6;
+      const r = Math.min(2, radius / 3) + rng.next() * radius;
       const p = { x: centre.x + Math.cos(a) * r, y: centre.y + Math.sin(a) * r };
       if (passable(space, p.x, p.y, { maxWater: 0.3, slopeCost: 0 })) out.push(p);
     }
     return out;
   }
 
-  // ---------------------------------------------------------------- seeing and knowing
+  // ---------------------------------------------------------------- seeing, meeting, remembering
 
   private spatial(): SpatialIndex {
     const g = this.world.graph;
@@ -546,65 +688,145 @@ export class Adam {
     return this.index;
   }
 
+  private sight(t: number): number {
+    return isNight(t) ? this.opts.sightNight : this.opts.sightDay;
+  }
+
   /** Everything that will come into view along the leg gets a sight event at that moment. */
   private scheduleSights(id: NodeId, leg: { path: readonly Vec2[]; depart: number; arrive: number }, rt: Runtime): void {
     const w = this.world;
-    const r = isNight(leg.depart) ? this.opts.sightNight : this.opts.sightDay;
+    const r = this.sight(leg.depart);
     const xs = leg.path.map((p) => p.x);
     const ys = leg.path.map((p) => p.y);
     const len = pathLength(leg.path);
+    const known = new Map(this.knowledge(id).map((k) => [k.subject, k]));
     const candidates = this.spatial().inBox(Math.min(...xs) - r, Math.min(...ys) - r, Math.max(...xs) + r, Math.max(...ys) + r);
     for (const c of candidates) {
-      if (rt.known.has(c.id) && !this.stale(id, c.id)) continue;
+      const k = known.get(c.id);
+      if (k && !this.worthRefreshing(id, k)) continue;
       for (let d = 0; d <= len + 1e-9; d += 0.5) {
         const p = pointAlong(leg.path, d);
         if (Math.hypot(p.x - c.pos.x, p.y - c.pos.y) <= r) {
           const t = leg.depart + (len === 0 ? 0 : (d / len) * (leg.arrive - leg.depart));
-          rt.leg.push(schedule(w, Math.max(t, w.time), { handler: "adam.see", data: { person: id, subject: c.id } }));
+          rt.step.push(schedule(w, Math.max(t, w.time), { handler: "adam.see", data: { person: id, subject: c.id } }));
           break;
         }
       }
     }
   }
 
-  private stale(person: NodeId, subject: NodeId): boolean {
+  /** Seeing something already known matters if it changed, or the memory needs reinforcing. */
+  private worthRefreshing(person: NodeId, k: Known): boolean {
     const g = this.world.graph;
-    for (const about of g.edgesOf(subject, "about")) {
-      const k = g.edgesOf(person, "knows").find((e) => e.to === about.from);
-      const learnedAt = k?.fromData["learnedAt"];
-      if (typeof learnedAt === "number") return this.world.time - learnedAt > REFRESH_AFTER;
-    }
-    return false;
+    const subject = g.node(k.subject);
+    const type = subject ? this.world.registry.types.get(subject.type) : undefined;
+    if (subject && type?.remember.some((a) => subject.attrs[a] !== k.it[a])) return true;
+    const edge = g.edgesOf(person, "knows").find((e) => e.to === k.claim);
+    const learnedAt = edge?.fromData["learnedAt"];
+    const memory = this.world.registry.types.get("Sighting")?.memory;
+    const after = memory ? 1 : REFRESH_AFTER;
+    return typeof learnedAt === "number" && this.world.time - learnedAt > after;
   }
 
-  /** A shared claim per thing-at-a-place; seeing it again refreshes the person's link (ADR-0015). */
+  /** People who will come within sight of each other along this leg get a meeting at that moment. */
+  private scheduleMeetings(id: NodeId, leg: { path: readonly Vec2[]; depart: number; arrive: number }, rt: Runtime): void {
+    const w = this.world;
+    if (!w.registry.reactions.some((r) => r.on === "meets")) return;
+    const len = pathLength(leg.path);
+    const span = leg.arrive - leg.depart;
+    const steps = Math.max(1, Math.ceil(span / 0.003));
+    for (const other of this.people()) {
+      if (other.id === id) continue;
+      const last = rt.lastMet.get(other.id);
+      if (last !== undefined && w.time - last < MEET_COOLDOWN) continue;
+      for (let i = 0; i <= steps; i++) {
+        const t = leg.depart + (span * i) / steps;
+        const a = pointAlong(leg.path, (len * i) / steps);
+        const b = this.positionOf(other.id, t);
+        if (b && Math.hypot(a.x - b.x, a.y - b.y) <= this.sight(t)) {
+          rt.step.push(schedule(w, Math.max(t, w.time), { handler: "adam.meet", data: { a: id, b: other.id } }));
+          break;
+        }
+      }
+    }
+  }
+
+  private meet(d: { a: NodeId; b: NodeId }): void {
+    const w = this.world;
+    const pa = this.positionOf(d.a);
+    const pb = this.positionOf(d.b);
+    if (!pa || !pb || Math.hypot(pa.x - pb.x, pa.y - pb.y) > this.sight(w.time) + 0.5) return;
+    const ra = this.runtime(d.a);
+    const rb = this.runtime(d.b);
+    const last = ra.lastMet.get(d.b);
+    if (last !== undefined && w.time - last < MEET_COOLDOWN) return;
+    ra.lastMet.set(d.b, w.time);
+    rb.lastMet.set(d.a, w.time);
+    emit(w, "adam", { kind: "met", a: d.a, b: d.b });
+    this.react("meets", d.a, { other: d.b });
+    this.react("meets", d.b, { other: d.a });
+  }
+
+  /**
+   * One shared claim per thing-at-a-place-as-seen (ADR-0015): what the person
+   * remembers of it is part of the claim. Memory rules (ADR-0026) decide whether
+   * it is kept, how fast it fades and how much seeing it again reinforces it.
+   */
   private see(d: { person: NodeId; subject: NodeId }): void {
     const w = this.world;
     const g = w.graph;
     const subject = g.node(d.subject);
-    if (!subject?.pos || !g.node(d.person)) return;
+    const person = g.node(d.person);
+    if (!subject?.pos || !person) return;
+    const type = w.registry.types.get(subject.type);
     const at = round2(subject.pos);
+    const remembered: Attrs = {};
+    for (const a of type?.remember ?? []) remembered[a] = subject.attrs[a] ?? null;
+    const sighting = requireType(w.registry, "Sighting", "knowledge");
+    const memory = sighting.memory;
+    const self = selfScope(person);
+
+    const myOld = g.edgesOf(d.person, "knows").filter((k) => k.from === d.person && g.edgesOf(k.to, "about").some((a) => a.to === d.subject));
+    const rng = createRng(w.seed).fork(hash2(hash2(d.person, d.subject), Math.floor(w.time * 10_000)));
+    if (myOld.length === 0 && memory && rng.next() >= this.num(memory.recall, { self })) return;
+
     let claim = g
       .edgesOf(d.subject, "about")
       .map((e) => g.node(e.from))
-      .find((c) => c && c.type === "Sighting" && c.attrs["x"] === at.x && c.attrs["y"] === at.y)?.id;
+      .find((c) => c && c.type === "Sighting" && c.attrs["x"] === at.x && c.attrs["y"] === at.y && Object.entries(remembered).every(([k, v]) => c.attrs[k] === v))?.id;
     if (claim === undefined) {
-      const sighting = requireType(w.registry, "Sighting", "knowledge");
-      claim = createNode(w, "adam", { kind: "knowledge", type: "Sighting", attrs: instantiateAttrs(sighting, createRng(0), { x: at.x, y: at.y }) });
+      claim = createNode(w, "adam", { kind: "knowledge", type: "Sighting", attrs: { ...instantiateAttrs(sighting, createRng(0), { x: at.x, y: at.y }), ...remembered } });
       createEdge(w, "adam", { type: "about", from: claim, to: d.subject });
     }
-    const existing = g.edgesOf(d.person, "knows").find((e) => e.to === claim);
-    if (existing) {
-      emit(w, "adam", { kind: "edge.data", id: existing.id, end: "from", data: { learnedAt: w.time } });
+
+    // Confidence: reinforced if they already knew the thing, fresh otherwise.
+    const prev = myOld.map((k) => k.fromData["confidence"]).find(isLazy);
+    const fade = memory ? this.num(memory.fade, { self }) : 0;
+    const base = prev && memory ? this.num(memory.reinforce, { self, confidence: readLazy(prev, w.time) }) : 1;
+    const confidence = lazy(clamp01(base), fade, w.time, 0, 1);
+
+    const same = myOld.find((k) => k.to === claim);
+    for (const k of myOld) if (k !== same) emit(w, "adam", { kind: "edge.removed", id: k.id });
+    let edgeId: EdgeId;
+    if (same) {
+      edgeId = same.id;
+      emit(w, "adam", { kind: "edge.data", id: same.id, end: "from", data: { learnedAt: w.time, confidence } });
     } else {
-      createEdge(w, "adam", { type: "knows", from: d.person, to: claim, fromData: { learnedAt: w.time, confidence: 1 } });
+      edgeId = createEdge(w, "adam", { type: "knows", from: d.person, to: claim, fromData: { learnedAt: w.time, confidence } });
     }
-    const rt = this.runtime(d.person);
-    if (!rt.known.has(d.subject)) {
-      rt.known.add(d.subject);
-      rt.knownPositions.push(at);
-      rt.knownCounts.set(subject.type, (rt.knownCounts.get(subject.type) ?? 0) + 1);
+    if (memory && fade < 0) {
+      const t = timeToReach(confidence, memory.forgetBelow, w.time);
+      if (t !== undefined) schedule(w, t, { handler: "adam.forget", data: { edge: edgeId, since: w.time } });
     }
+    if (myOld.length === 0) this.react("sees", d.person, { it: d.subject });
+  }
+
+  /** A memory faded below the pack's line: the person no longer knows it (Entropy, ADR-0021). */
+  private forget(d: { edge: EdgeId; since: number }): void {
+    const e = this.world.graph.edge(d.edge);
+    const c = e?.fromData["confidence"];
+    if (!e || !isLazy(c) || c.since !== d.since) return;
+    emit(this.world, "entropy", { kind: "edge.removed", id: d.edge });
   }
 
   // ---------------------------------------------------------------- helpers
@@ -612,35 +834,63 @@ export class Adam {
   private runtime(id: NodeId): Runtime {
     let rt = this.rt.get(id);
     if (rt) return rt;
-    rt = { leg: [], needEdges: new Map(), known: new Set(), knownPositions: [], knownCounts: new Map(), exhausted: new Set() };
-    // Rebuild from the graph, so Adam can pick up a world that already ran.
+    rt = { step: [], needEdges: new Map(), lastMet: new Map(), instant: { t: -1, n: 0 } };
     const g = this.world.graph;
     for (const e of g.edgesOf(id, "has")) {
       const mind = g.node(e.to);
       if (mind && this.world.registry.types.get(mind.type)?.need) rt.needEdges.set(mind.type, e.id);
     }
     this.rt.set(id, rt);
-    for (const s of knownSubjects(this.world, id)) {
-      if (!s.pos) continue;
-      rt.known.add(s.id);
-      rt.knownPositions.push(s.pos);
-      rt.knownCounts.set(s.type, (rt.knownCounts.get(s.type) ?? 0) + 1);
-    }
     return rt;
   }
 
   private num(src: NumberSource, scope: Scope, rng?: Rng): number {
     if ("literal" in src) return src.literal;
-    const v: Value = evaluate(src.expr, rng ? { scope, rng } : { scope });
-    if (typeof v !== "number") throw new Error(`expression "${src.expr.source}" must give a number, got ${JSON.stringify(v)}`);
-    return v;
+    return numberOf(src.expr, scope, rng);
+  }
+
+  /** A number from a pack rule, or 0 with a warning if the rule fails at runtime. */
+  private safeNum(src: NumberSource, scope: Scope, label: string): number {
+    try {
+      return this.num(src, scope);
+    } catch (e) {
+      this.warn(label, e);
+      return 0;
+    }
+  }
+
+  /** A condition from a pack rule; a failing one counts as false, with a warning. */
+  private test(cond: Compiled, scope: Scope, label: string): boolean {
+    try {
+      return evaluate(cond, { scope }) === true;
+    } catch (e) {
+      this.warn(label, e);
+      return false;
+    }
+  }
+
+  private warn(where: string, e: unknown): void {
+    const msg = `${where}: ${e instanceof Error ? e.message : String(e)}`;
+    if (this.warnings.includes(msg)) return;
+    this.warnings.push(msg);
+    if (this.warnings.length > 50) this.warnings.shift();
   }
 }
 
-function selfScope(n: GraphNode): Scope {
+function numberOf(expr: Compiled, scope: Scope, rng?: Rng): number {
+  const v: Value = evaluate(expr, rng ? { scope, rng } : { scope });
+  if (typeof v !== "number") throw new Error(`expression "${expr.source}" must give a number, got ${JSON.stringify(v)}`);
+  return v;
+}
+
+function attrScope(attrs: Attrs): Scope {
   const out: Scope = {};
-  for (const [k, v] of Object.entries(n.attrs)) if (v === null || typeof v !== "object") out[k] = v;
+  for (const [k, v] of Object.entries(attrs)) if (v === null || typeof v !== "object") out[k] = v;
   return out;
+}
+
+function selfScope(n: GraphNode): Scope {
+  return { ...attrScope(n.attrs), id: n.id };
 }
 
 function clamp01(x: number): number {

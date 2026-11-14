@@ -109,6 +109,9 @@ export function drawWorld(ctx: CanvasRenderingContext2D, sim: Simulation, base: 
     if (n.type === "Stone") {
       ctx.fillStyle = "#8a8a86";
       ctx.rect(x - s * 0.45, y - s * 0.45, s * 0.9, s * 0.9);
+    } else if (n.type === "Bush") {
+      ctx.fillStyle = n.attrs["food"] === 0 ? "#6f7a52" : "#8e3b6a";
+      ctx.arc(x, y, s * 0.4, 0, Math.PI * 2);
     } else if (n.type === "Tree" && n.attrs["wood"] === 0) {
       ctx.fillStyle = "#7a5a3a";
       ctx.arc(x, y, s * 0.3, 0, Math.PI * 2);

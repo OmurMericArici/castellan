@@ -62,3 +62,4 @@ even while the record is still proposed.
 | 0025 | [Shelter in M4: concepts, gathering, building, villages, Entropy](0025-shelter-m4.md) | accepted (technical) |
 | 0026 | [Behaviour in packs: steps, reactions, memory rules](0026-behaviour-in-packs.md) | accepted |
 | 0027 | [We are building an engine; the world is its default pack](0027-engine-and-default-pack.md) | accepted (principle) |
+| 0028 | [Behaviour engine in M5: how steps, reactions and memory were built](0028-behaviour-engine-m5.md) | accepted (technical) |

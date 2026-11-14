@@ -1,0 +1,53 @@
+{
+  "pack": "hunger",
+  "version": "0.1.0",
+  "description": "People get hungry. They remember berry bushes, forage from them, and search when they know none. Bushes spread on fertile land.",
+  "requires": ["core"],
+  "types": {
+    "Bush": {
+      "kind": "entity",
+      "leaf": true,
+      "memorable": true,
+      "remember": ["food"],
+      "description": "A berry bush.",
+      "attrs": {
+        "food": { "type": "number", "min": 0, "default": { "expr": "rand_int(3, 8)" }, "description": "Handfuls of berries left." }
+      },
+      "spread": { "every": 2, "count": 4, "radius": 3, "field": "fertility" }
+    },
+    "Hunger": {
+      "kind": "mind",
+      "role": "need",
+      "description": "Rises through the day, slower while resting.",
+      "start": "rand_range(0.1, 0.3)",
+      "rate": "if(doing == \"Rest\", 0.15, 0.6)",
+      "urgentAt": 0.75
+    },
+    "Eat": {
+      "kind": "mind",
+      "role": "goal",
+      "tier": 1,
+      "weight": "needs.Hunger",
+      "description": "Not going hungry."
+    },
+    "Forage": {
+      "kind": "mind",
+      "role": "action",
+      "description": "Walk to a bush they remember having berries, pick a handful and eat it.",
+      "steps": [
+        { "goto": { "known": "Bush", "where": "it.food > 0" } },
+        { "work": 0.02 },
+        { "take": { "from": "food", "amount": 1 } },
+        { "effect": { "needs.Hunger": -0.4 } }
+      ],
+      "serves": { "Eat": "if(needs.Hunger > 0.3, 1, 0)" }
+    },
+    "SeekFood": {
+      "kind": "mind",
+      "role": "action",
+      "description": "Look for food when they know of none.",
+      "steps": [{ "goto": { "explore": true } }],
+      "serves": { "Eat": "if(knows.Bush == 0 and needs.Hunger > 0.3, 0.9, 0)" }
+    }
+  }
+}

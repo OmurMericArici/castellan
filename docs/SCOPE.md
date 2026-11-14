@@ -45,7 +45,7 @@ Each milestone ends with something visible, a devlog entry and a screenshot or G
 | M5 | Behaviour in packs | Actions are step programs, reactions fire on events, memory rules live on knowledge types, people notice each other (`meets`). Adam's hard-coded verbs are gone. `hunger`, `hostility` and memory rules work as packs written from PACKS.md alone (ADR-0026, 0027). |
 | M6 | Form and story | WFC house layouts, person story panel, timeline, Noah config in the URL, README with GIF. **v0.1 ships.** |
 
-Current milestone: **M5** (M0–M4 done 2026-11-14; M5 redefined 2026-11-15).
+Current milestone: **M6** (M0–M4 done 2026-11-14, M5 done 2026-11-15).
 
 ## Parking lot
 
@@ -58,7 +58,8 @@ Moving an item into scope needs a decision record.
 - 2026-11-14 — Adam assigns personalities (trait nodes) to people.
 - 2026-11-14 — Trade routes emerging from shared knowledge (merchants teaching others).
 - 2026-11-14 — Desire paths: routes people walk often wear into trails; Molly recognises and names them as roads.
-- 2026-11-14 — LLM workflow for writing packs (schema + examples + Archie's errors as feedback).
+- 2026-11-14 — LLM workflow for writing packs (schema + examples + Archie's errors as feedback). First step: a blind test, a fresh LLM writing a pack from PACKS.md alone.
+- 2026-11-15 — Packs extending other packs' types (`extends`), e.g. hostility adding an attribute to Person.
 - 2026-11-13 — 3D voxel rendering as a homage to Minecraft castles.
 - 2026-11-13 — Castles: a settlement-scale pack where a castle emerges from towers, walls and a gate (the original idea).
 - 2026-11-13 — Vector-space synthesis (proposal/modulation kernels) from the old Synthesis Lab as an alternative actualizer for organic layouts.

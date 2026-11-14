@@ -2,7 +2,9 @@ import { clockLabel, createSimulation, createWorld, DEFAULT_ADAM, genesis, isNig
 import type { NodeId } from "../core";
 import CORE from "../packs/core.json";
 import SHELTER from "../packs/shelter.json";
-import { DEFAULT_NOAH } from "./noah-default";
+import HUNGER from "../packs/hunger.json";
+import HOSTILITY from "../packs/hostility.json";
+import { DEFAULT_NOAH, NOAH_HUNGER_LEAVES } from "./noah-default";
 import { drawWorld, renderSpace } from "./render";
 import { StoryBook } from "./story";
 
@@ -21,6 +23,7 @@ const newSeedButton = $<HTMLButtonElement>("#new-seed");
 const clock = $<HTMLElement>("#clock");
 const summary = $<HTMLElement>("#summary");
 const panel = $<HTMLElement>("#person");
+const warningsBox = $<HTMLElement>("#warnings");
 
 const params = new URLSearchParams(location.search);
 const seed = Number(params.get("seed") ?? 1) >>> 0;
@@ -28,7 +31,7 @@ $<HTMLElement>("#seed").textContent = String(seed);
 
 const world = createWorld(seed);
 try {
-  loadPacks(world, [CORE, SHELTER]);
+  loadPacks(world, [CORE, SHELTER, HUNGER, HOSTILITY]);
 } catch (e) {
   // Archie's message lists every problem with its place in the pack.
   summary.textContent = e instanceof Error ? e.message : String(e);
@@ -36,7 +39,7 @@ try {
   throw e;
 }
 $<HTMLElement>("#packs").textContent = world.registry.packs.map((p) => `${p.id} ${p.version}`).join(", ");
-genesis(world, DEFAULT_NOAH);
+genesis(world, { ...DEFAULT_NOAH, leaves: [...DEFAULT_NOAH.leaves, ...NOAH_HUNGER_LEAVES] });
 const sim = createSimulation(world);
 sim.start();
 const space = world.space!;
@@ -73,7 +76,7 @@ canvas.addEventListener("click", (ev) => {
   if (best) selected = best.id;
 });
 
-const LABEL: Record<string, string> = { Explore: "exploring", Wander: "wandering", Rest: "resting", Scout: "scouting for trees", Gather: "gathering wood", Build: "building" };
+const LABEL: Record<string, string> = { Explore: "exploring", Wander: "wandering", Rest: "resting", Scout: "scouting for trees", Gather: "gathering wood", Deliver: "carrying wood to the site", Build: "building", Forage: "foraging", SeekFood: "looking for food", Confront: "confronting someone" };
 
 function renderPanel(): void {
   if (selected === undefined) return;
@@ -94,10 +97,15 @@ function renderPanel(): void {
     : plan
       ? `building a house: ${String(plan.attrs["stock"])}/10 wood at the site${carrying ? `, carrying ${carrying}` : ""}`
       : "no home yet";
+  const grudges = world.graph
+    .edgesOf(selected, "grudge")
+    .filter((e) => e.from === selected)
+    .map((e) => String(world.graph.node(e.to)?.attrs["name"] ?? "someone"));
+  const grudgeLine = grudges.length ? ` · holds a grudge against ${grudges.join(", ")}` : "";
   panel.innerHTML = `
     <h2>${String(p.attrs["name"] ?? `Person ${p.id}`)}</h2>
     <p class="hint">${String(p.attrs["age"])} years · determination ${String(p.attrs["determination"])} · ${doing ? LABEL[doing] ?? doing : "—"} · knows ${sim.adam.knownCount(selected)} things</p>
-    <p class="hint">${homeLine}</p>
+    <p class="hint">${homeLine}${grudgeLine}</p>
     <div class="needs">${bars}</div>
     <ol class="story">${lines}</ol>`;
 }
@@ -125,6 +133,8 @@ function frame(now: number): void {
       `${sim.adam.people().length} people · ${builtCount} houses built, ${houses.length - builtCount} being built` +
       (villages.length ? ` · villages: ${villages.join(", ")}` : "") +
       ` · ${[...world.graph.nodes({ type: "Sighting" })].length} shared sightings · ${world.log.length} events`;
+    warningsBox.hidden = sim.adam.warnings.length === 0;
+    warningsBox.textContent = sim.adam.warnings.length ? `Pack rules that failed and were skipped:\n${sim.adam.warnings.join("\n")}` : "";
     lastPanel = now;
   }
   requestAnimationFrame(frame);
