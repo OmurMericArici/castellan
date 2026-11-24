@@ -3,6 +3,19 @@
 Newest first. One entry per session: what changed, what was learned, what's next.
 Add a screenshot/GIF path whenever something is visible.
 
+## 2026-11-24 — Direction: back to the settlement chain (docs only)
+
+- Reviewed the scope: the packs and the parking lot had drifted from settlements into depth
+  of the mind (hostility, psychopathy, a mostly social-psychology parking lot).
+- The user kept the definition: Castellan is about the bonds between house, village, town,
+  city, castle and trade. ADR-0038 records it; SCOPE.md gets a direction rule.
+- Parking lot split into Chain (ordered), Engine/tools/form, Mind (not now) and Done.
+  No item was deleted.
+- Learned: drift came one pack at a time, each step reasonable on its own; a one-line test
+  per pack catches it earlier than a review.
+- **Next:** rest of M6 (Noah config in the URL, README with GIF, WFC house layouts), then the
+  first Chain item.
+
 ## 2026-11-14 — M6: packs bring their own watchers and logs
 
 - The user moved ADR-0037 into M6; it is the milestone's timeline and story panel. Format 0.7.
