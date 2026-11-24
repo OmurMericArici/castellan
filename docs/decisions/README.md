@@ -72,3 +72,4 @@ even while the record is still proposed.
 | 0035 | [The engine offers every tool needed to model human behaviour](0035-every-tool-for-behaviour.md) | accepted (principle) |
 | 0036 | [A village is its members, not a radius](0036-village-is-its-members.md) | accepted (direction; mechanism proposed) |
 | 0037 | [Packs bring their own watchers and logs](0037-pack-watchers-and-logs.md) | accepted (built in M6) |
+| 0038 | [Direction: the settlement chain comes first](0038-direction-settlement-chain.md) | accepted (direction) |
